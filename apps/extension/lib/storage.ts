@@ -8,6 +8,8 @@ import {
   type HomepageModel,
   type KVStore,
   type ModelInfo,
+  type SkinId,
+  findSkin,
 } from "@homepage/agent-core";
 
 /**
@@ -39,6 +41,8 @@ export const KEYS = {
   buildSnapshot: "buildSnapshot",
   /** Colour scheme: "system" | "dark" | "light" (see lib/theme.ts). */
   theme: "theme",
+  /** Look applied over the generated page without rebuilding: a SkinId, or null for the agent's own look. */
+  skin: "skin",
 } as const;
 
 export interface Homepage {
@@ -61,6 +65,7 @@ export interface Settings {
   blockedSites: string[];
   /** Unset means on — auto-rebuild is opt-out. */
   autoRebuild: boolean;
+  skin: SkinId | null;
 }
 
 export interface ModelCatalog {
@@ -93,6 +98,7 @@ export async function loadSettings(): Promise<Settings> {
     KEYS.systemPrompt,
     KEYS.blockedSites,
     KEYS.autoRebuild,
+    KEYS.skin,
   ]);
   const model = s[KEYS.model] as string | undefined;
   return {
@@ -106,6 +112,7 @@ export async function loadSettings(): Promise<Settings> {
     systemPrompt: (s[KEYS.systemPrompt] as string | undefined) ?? "",
     blockedSites: (s[KEYS.blockedSites] as string[] | undefined) ?? [...DEFAULT_BLOCKED_SITES],
     autoRebuild: s[KEYS.autoRebuild] !== false,
+    skin: findSkin(s[KEYS.skin] as string | undefined)?.id ?? null,
   };
 }
 

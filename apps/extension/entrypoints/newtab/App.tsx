@@ -4,8 +4,10 @@ import {
   DEFAULT_MODEL,
   DEFAULT_BLOCKED_SITES,
   OPENAI_STORAGE_KEYS,
+  findSkin,
   type EngineId,
   type HomepageModel,
+  type SkinId,
 } from "@homepage/agent-core";
 import { BUILD_STEPS, type AuthState } from "@/lib/protocol";
 import { extensionStore, loadHomepage, loadSettings, saveSetting } from "@/lib/storage";
@@ -34,6 +36,8 @@ export default function App() {
   const [blockedSites, setBlockedSites] = useState<string[]>(DEFAULT_BLOCKED_SITES);
   const [model, setModel] = useState<HomepageModel>(DEFAULT_MODEL);
   const [openaiModel, setOpenaiModel] = useState<string | null>(null);
+  /** The look applied over the generated page; null = as built. */
+  const [skin, setSkin] = useState<SkinId | null>(null);
   const [autoRebuild, setAutoRebuild] = useState(true);
   /** Transpiled homepage, ready for Sandpack. */
   const [renderedCode, setRenderedCode] = useState<string | null>(null);
@@ -93,6 +97,7 @@ export default function App() {
         setBlockedSites(settings.blockedSites);
         setModel(settings.model);
         setOpenaiModel(settings.openaiModel);
+        setSkin(settings.skin);
         setAutoRebuild(settings.autoRebuild);
         setResumable(Boolean(activeSession || checkpoint));
         if (homepage?.code) setRenderedCode(toRenderable(homepage.code));
@@ -160,6 +165,10 @@ export default function App() {
     setOpenaiModel(next);
     await saveSetting("openaiModel", next);
   }, []);
+  const changeSkin = useCallback(async (next: SkinId | null) => {
+    setSkin(next);
+    await saveSetting("skin", next);
+  }, []);
   const toggleAutoRebuild = useCallback(async (next: boolean) => {
     setAutoRebuild(next);
     await saveSetting("autoRebuild", next);
@@ -200,6 +209,8 @@ export default function App() {
       onChangeOpenAIModel={changeOpenAIModel}
       onForgetKey={forgetKey}
       onSignOut={signOut}
+      skin={skin}
+      onChangeSkin={changeSkin}
       autoRebuild={autoRebuild}
       onToggleAutoRebuild={toggleAutoRebuild}
       onClose={() => setShowSettings(false)}
@@ -326,7 +337,7 @@ export default function App() {
         </div>
       )}
 
-      <HomepagePreview code={renderedCode} theme={theme} resolvedTheme={resolvedTheme} />
+      <HomepagePreview code={renderedCode} theme={theme} resolvedTheme={resolvedTheme} skin={findSkin(skin) ?? null} />
 
       {settingsModal}
     </div>
