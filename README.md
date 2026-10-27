@@ -131,10 +131,11 @@ register another ChatGPT account or workspace.
 
 - **Cost.** With an API key, each build is billed to that key; what it costs depends
   on the model and on how much it reads. With a ChatGPT plan, builds count against
-  your plan's app usage instead: Plus plans share one five-hour limit across all apps,
-  Pro plans don't have it, and when a limit is hit the build stops with a clear message
-  (see [chatgpt.com/settings/usage](https://chatgpt.com/settings/usage)). You can turn
-  off automatic rebuilds to build only when you ask.
+  your plan's app usage instead. Plus plans share one five-hour limit across all apps.
+  Pro plans don't have that one, but other limits, including per-app ones, can still
+  apply. When a limit is reached, the page says so, keeps your last homepage, and links
+  to [chatgpt.com/settings/usage](https://chatgpt.com/settings/usage). You can turn off
+  automatic rebuilds to build only when you ask.
 - **What it can see.** It ranks the sites in your history, with each subreddit you
   visit ranked on its own, and opens up to 10 of them per build. It skips search
   engines, webmail, banking and logged-out marketing pages. Anything it can't open is
