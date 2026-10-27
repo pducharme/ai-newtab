@@ -1,15 +1,17 @@
 /**
  * A scripted stand-in for api.openai.com, for exercising the agent loop without
  * a network. Each turn receives the parsed /responses body and answers with
- * output items (streamed as SSE the way the real API does), an HTTP error, or
- * a mid-stream `response.failed`.
+ * output items (streamed as SSE the way the real API does), an HTTP error, a
+ * mid-stream `response.failed`, or a mid-stream `error` event.
  */
 import type { OutputFunctionCall, OutputItem } from "@homepage/agent-core";
 
 export type FakeTurnResult =
   | { output: OutputItem[]; /** Send an empty `output` in response.completed (a slim proxy response). */ slimCompleted?: boolean }
   | { httpStatus: number; error: { code?: string; message?: string; param?: string | null } }
-  | { failed: { code: string; message?: string } };
+  | { failed: { code: string; message?: string } }
+  /** Fields of a mid-stream `{type: "error", …}` event, e.g. `{ error: { type, code, message } }`. */
+  | { streamError: Record<string, unknown> };
 
 export type FakeTurn = (body: any, turn: number) => FakeTurnResult;
 
@@ -89,6 +91,13 @@ export function fakeOpenAI(
       return Response.json({ error: { type: "invalid_request_error", ...result.error } }, { status: result.httpStatus });
     }
     const id = `resp_${turn}`;
+    if ("streamError" in result) {
+      return sse([
+        { type: "response.created", response: { id, status: "in_progress", output: [] } },
+        { type: "response.output_text.delta", delta: "partial " },
+        { type: "error", sequence_number: 2, ...result.streamError },
+      ]);
+    }
     if ("failed" in result) {
       return sse([
         { type: "response.created", response: { id, status: "in_progress", output: [] } },

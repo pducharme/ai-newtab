@@ -6,7 +6,8 @@
  * - no `previous_response_id`: the whole history rides along in `input`;
  * - the unsupported fields (temperature, max_output_tokens, background, …) are
  *   simply never sent;
- * - `response.failed` can arrive mid-stream and carries the plan-usage codes.
+ * - `response.failed` can arrive mid-stream and carries the plan-usage codes;
+ *   an `error` event can too, with its fields nested under `error`.
  *
  * Plain `fetch` + an SSE parser: no SDK, so the extension bundle stays small and
  * every byte sent with the user's token is visible here.
@@ -79,7 +80,8 @@ export interface OutputReasoning {
 export type OutputItem = OutputMessage | OutputFunctionCall | OutputReasoning | { type: string; [k: string]: unknown };
 
 export interface ResponseError {
-  code?: string;
+  type?: string;
+  code?: string | null;
   message?: string;
   param?: string | null;
 }
@@ -116,9 +118,11 @@ export interface StreamEvent {
   delta?: string;
   text?: string;
   arguments?: string;
-  code?: string;
+  code?: string | null;
   message?: string;
   param?: string | null;
+  /** On `error` events the API nests the details here rather than at the top level. */
+  error?: ResponseError | null;
   [k: string]: unknown;
 }
 
@@ -126,10 +130,22 @@ export interface StreamEvent {
 // errors
 // ---------------------------------------------------------------------------
 
+export interface OpenAIErrorDetails {
+  status?: number;
+  code?: string;
+  param?: string | null;
+  /** The API's error `type`, e.g. `server_error` or `invalid_request_error`. */
+  type?: string;
+  requestId?: string | null;
+  body?: string;
+  /** True when the failure arrived after the stream opened (HTTP 200). */
+  midStream?: boolean;
+}
+
 export class OpenAIError extends Error {
   constructor(
     message: string,
-    readonly opts: { status?: number; code?: string; param?: string | null; requestId?: string | null; body?: string } = {},
+    readonly opts: OpenAIErrorDetails = {},
   ) {
     super(message);
     this.name = "OpenAIError";
@@ -142,6 +158,39 @@ export class OpenAIError extends Error {
   }
   get param() {
     return this.opts.param;
+  }
+  get type() {
+    return this.opts.type;
+  }
+  get requestId() {
+    return this.opts.requestId ?? undefined;
+  }
+
+  /**
+   * A request-shape complaint the caller can fix by reshaping the body: an HTTP
+   * 400, or the same complaint delivered as a mid-stream error.
+   */
+  get isInvalidRequest(): boolean {
+    if (this.status === 400) return true;
+    return (
+      !!this.opts.midStream &&
+      (this.type === "invalid_request_error" || this.code === "subscription_sharing_unsupported_capability")
+    );
+  }
+
+  /**
+   * Worth sending the same turn again after a pause: server-side and network
+   * failures, and the plan-usage checks the docs call temporary. Never a usage
+   * limit, an auth failure or a bad request.
+   */
+  get isTransient(): boolean {
+    const code = this.code ?? "";
+    if (NON_RETRYABLE_CODES.has(code)) return false;
+    if (RETRYABLE_SIWC_CODES.has(code) || TRANSIENT_CODES.has(code)) return true;
+    if (this.type === "server_error") return true;
+    if (this.status !== undefined) return this.status >= 500 || this.status === 408 || (this.status === 429 && code === "rate_limit_exceeded");
+    // A mid-stream error that names neither a code nor a request problem.
+    return !!this.opts.midStream && !code && this.type !== "invalid_request_error";
   }
 }
 
@@ -170,22 +219,53 @@ export const RETRYABLE_SIWC_CODES = new Set([
   "subscription_sharing_user_unavailable",
 ]);
 
+/** Failures of the transport or the server rather than of the request. */
+const TRANSIENT_CODES = new Set(["server_error", "internal_error", "stream_interrupted", "stream_ended", "network_error"]);
+
+/** Codes that must not be retried as-is, whatever their HTTP status. */
+const NON_RETRYABLE_CODES = new Set([
+  "subscription_sharing_usage_limit_exceeded",
+  "subscription_sharing_user_not_eligible",
+  "subscription_sharing_unsupported_capability",
+  "subscription_sharing_route_not_supported",
+  "subscription_sharing_invalid_user",
+  "chatpass_v2_scope_not_authorized",
+  "chatpass_v2_invalid_authorization_context",
+  "insufficient_quota",
+  "incomplete",
+]);
+
+/** The user-facing text: the documented meaning when there is one, plus what support needs to trace it. */
 export function describeOpenAIError(err: OpenAIError): string {
   const code = err.code ?? "";
-  const known = SIWC_ERROR_MESSAGES[code];
-  if (known) return known;
-  return err.message;
+  const text = SIWC_ERROR_MESSAGES[code] ?? err.message;
+  const trace = [code && !text.includes(code) ? code : "", err.requestId ? `request ${err.requestId}` : ""].filter(Boolean);
+  return trace.length ? `${text} (${trace.join(", ")})` : text;
+}
+
+/** One line for the activity log with everything known about the failure. */
+export function errorDiagnostics(err: OpenAIError): string {
+  const parts = [
+    err.status !== undefined ? `status=${err.status}` : err.opts.midStream ? "mid-stream" : "",
+    err.type ? `type=${err.type}` : "",
+    err.code ? `code=${err.code}` : "",
+    err.param ? `param=${err.param}` : "",
+    err.requestId ? `request=${err.requestId}` : "",
+  ].filter(Boolean);
+  return `${parts.join(" ")}${err.opts.body ? ` body=${err.opts.body.slice(0, 400)}` : ""}`;
 }
 
 function errorFromBody(status: number, text: string, requestId: string | null): OpenAIError {
   let code: string | undefined;
   let param: string | null | undefined;
+  let type: string | undefined;
   let message = text.slice(0, 300);
   try {
     const json = JSON.parse(text) as { error?: ResponseError | string; detail?: string };
     if (json.error && typeof json.error === "object") {
       code = json.error.code ?? undefined;
       param = json.error.param;
+      type = json.error.type;
       message = json.error.message ?? message;
     } else if (typeof json.error === "string") {
       code = json.error;
@@ -201,6 +281,7 @@ function errorFromBody(status: number, text: string, requestId: string | null): 
     status,
     code,
     param,
+    type,
     requestId,
     body: text,
   });
@@ -278,16 +359,24 @@ export interface StreamOptions {
  */
 export async function streamResponse(opts: StreamOptions): Promise<ResponseObject> {
   const fetchImpl = opts.fetch ?? fetch;
-  const res = await fetchImpl(`${OPENAI_API_BASE}/responses`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${opts.accessToken}`,
-      "content-type": "application/json",
-      accept: "text/event-stream",
-    },
-    body: JSON.stringify({ ...opts.request, store: false, stream: true }),
-    signal: opts.signal,
-  });
+  let res: Response;
+  try {
+    res = await fetchImpl(`${OPENAI_API_BASE}/responses`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${opts.accessToken}`,
+        "content-type": "application/json",
+        accept: "text/event-stream",
+      },
+      body: JSON.stringify({ ...opts.request, store: false, stream: true }),
+      signal: opts.signal,
+    });
+  } catch (err) {
+    if (opts.signal?.aborted) throw err;
+    throw new OpenAIError(`Could not reach the OpenAI API: ${err instanceof Error ? err.message : String(err)}`, {
+      code: "network_error",
+    });
+  }
   const requestId = res.headers.get("x-request-id");
   if (!res.ok) throw errorFromBody(res.status, await res.text(), requestId);
   if (!res.body) throw new OpenAIError("Response had no body.", { status: res.status, requestId });
@@ -298,58 +387,91 @@ export async function streamResponse(opts: StreamOptions): Promise<ResponseObjec
   // are the primary source and the completed object the cross-check.
   const items = new Map<number, OutputItem>();
   let completed: ResponseObject | undefined;
-  for await (const event of parseSse(res.body, opts.signal)) {
-    opts.onEvent?.(event);
-    switch (event.type) {
-      case "response.output_item.added":
-        if (event.item && typeof event.output_index === "number") items.set(event.output_index, event.item);
-        break;
-      case "response.output_item.done":
-        if (event.item && typeof event.output_index === "number") items.set(event.output_index, event.item);
-        break;
-      case "response.function_call_arguments.done": {
-        const item = typeof event.output_index === "number" ? items.get(event.output_index) : undefined;
-        if (item?.type === "function_call" && typeof event.arguments === "string") {
-          (item as OutputFunctionCall).arguments = event.arguments;
+  let callbackError: unknown;
+  try {
+    for await (const event of parseSse(res.body, opts.signal)) {
+      try {
+        opts.onEvent?.(event);
+      } catch (err) {
+        callbackError = err;
+        throw err;
+      }
+      switch (event.type) {
+        case "response.output_item.added":
+          if (event.item && typeof event.output_index === "number") items.set(event.output_index, event.item);
+          break;
+        case "response.output_item.done":
+          if (event.item && typeof event.output_index === "number") items.set(event.output_index, event.item);
+          break;
+        case "response.function_call_arguments.done": {
+          const item = typeof event.output_index === "number" ? items.get(event.output_index) : undefined;
+          if (item?.type === "function_call" && typeof event.arguments === "string") {
+            (item as OutputFunctionCall).arguments = event.arguments;
+          }
+          break;
         }
-        break;
-      }
-      case "response.output_text.done": {
-        const item = typeof event.output_index === "number" ? items.get(event.output_index) : undefined;
-        if (item?.type === "message" && typeof event.text === "string") {
-          const content = (item as OutputMessage).content ?? [];
-          const index = typeof event.content_index === "number" ? event.content_index : content.length;
-          content[index] = { type: "output_text", text: event.text, annotations: [] };
-          (item as OutputMessage).content = content;
+        case "response.output_text.done": {
+          const item = typeof event.output_index === "number" ? items.get(event.output_index) : undefined;
+          if (item?.type === "message" && typeof event.text === "string") {
+            const content = (item as OutputMessage).content ?? [];
+            const index = typeof event.content_index === "number" ? event.content_index : content.length;
+            content[index] = { type: "output_text", text: event.text, annotations: [] };
+            (item as OutputMessage).content = content;
+          }
+          break;
         }
-        break;
+        case "response.completed":
+          completed = event.response;
+          break;
+        case "response.failed": {
+          const error = event.response?.error ?? undefined;
+          const code = error?.code ?? undefined;
+          const known = code ? SIWC_ERROR_MESSAGES[code] : undefined;
+          throw new OpenAIError(known ?? `Response failed: ${error?.message ?? code ?? "unknown_error"}`, {
+            code,
+            param: error?.param,
+            type: error?.type,
+            requestId,
+            body: JSON.stringify(error ?? null),
+            midStream: true,
+          });
+        }
+        case "response.incomplete":
+          throw new OpenAIError(
+            `Response was cut short (${event.response?.incomplete_details?.reason ?? "unknown reason"}).`,
+            { code: "incomplete", requestId, midStream: true },
+          );
+        case "error": {
+          // The API reference puts `code` and `message` at the top level, while the
+          // SIWC error docs describe an `error` object (`{type, code, message,
+          // param}`). Read both; the raw event goes into the activity log.
+          const nested = event.error && typeof event.error === "object" ? event.error : undefined;
+          const code = nested?.code ?? event.code ?? undefined;
+          const message = nested?.message ?? event.message;
+          const known = code ? SIWC_ERROR_MESSAGES[code] : undefined;
+          throw new OpenAIError(known ?? `Stream error: ${message ?? code ?? nested?.type ?? "no details from the server"}`, {
+            code,
+            param: nested?.param ?? event.param,
+            type: nested?.type,
+            requestId,
+            body: JSON.stringify(event),
+            midStream: true,
+          });
+        }
       }
-      case "response.completed":
-        completed = event.response;
-        break;
-      case "response.failed": {
-        const error = event.response?.error ?? undefined;
-        const code = error?.code;
-        const known = code ? SIWC_ERROR_MESSAGES[code] : undefined;
-        throw new OpenAIError(known ?? `Response failed: ${error?.message ?? code ?? "unknown_error"}`, {
-          code,
-          param: error?.param,
-          requestId,
-        });
-      }
-      case "response.incomplete":
-        throw new OpenAIError(
-          `Response was cut short (${event.response?.incomplete_details?.reason ?? "unknown reason"}).`,
-          { code: "incomplete", requestId },
-        );
-      case "error":
-        throw new OpenAIError(
-          (event.code && SIWC_ERROR_MESSAGES[event.code]) ?? `Stream error: ${event.message ?? event.code ?? "unknown"}`,
-          { code: event.code, param: event.param, requestId },
-        );
     }
+  } catch (err) {
+    if (err instanceof OpenAIError || err === callbackError || opts.signal?.aborted) throw err;
+    // The connection dropped while reading: the turn can be sent again.
+    throw new OpenAIError(`The stream was interrupted: ${err instanceof Error ? err.message : String(err)}`, {
+      code: "stream_interrupted",
+      requestId,
+      midStream: true,
+    });
   }
-  if (!completed) throw new OpenAIError("Stream ended without response.completed.", { code: "stream_ended", requestId });
+  if (!completed) {
+    throw new OpenAIError("Stream ended without response.completed.", { code: "stream_ended", requestId, midStream: true });
+  }
   const streamed = [...items.entries()].sort(([a], [b]) => a - b).map(([, item]) => item);
   const reported = Array.isArray(completed.output) ? completed.output : [];
   return { ...completed, output: streamed.length >= reported.length ? streamed : reported };

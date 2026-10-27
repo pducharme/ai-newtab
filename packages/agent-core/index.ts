@@ -19,4 +19,4 @@ export * from "./openai/siwc";
 export * from "./openai/client";
 export * from "./openai/sandbox";
 export * from "./openai/tools";
-export { OPENAI_STORAGE_KEYS, DEFAULT_REASONING_EFFORT, unansweredCalls, type BuildCheckpoint, type ApiCompat } from "./openai/orchestrator";
+export { OPENAI_STORAGE_KEYS, DEFAULT_REASONING_EFFORT, DEFAULT_RETRY_DELAYS_MS, unansweredCalls, type BuildCheckpoint, type ApiCompat } from "./openai/orchestrator";

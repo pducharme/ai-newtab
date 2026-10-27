@@ -1,6 +1,7 @@
 import { buildHistoryDigest, slugifyUrl } from "../history-digest";
 import {
   OpenAIError,
+  errorDiagnostics,
   streamResponse,
   type InputItem,
   type OutputFunctionCall,
@@ -57,7 +58,17 @@ export interface OpenAIRunOptions extends CommonRunOptions {
   /** Safety valve against a model that never writes the file. */
   maxTurns?: number;
   reasoningEffort?: "minimal" | "low" | "medium" | "high";
+  /** Pauses before re-sending a turn that failed transiently; its length bounds the retries. Injectable for tests. */
+  retryDelaysMs?: number[];
 }
+
+/**
+ * A turn that fails on the server's side (a 5xx, a mid-stream `server_error`, a
+ * dropped connection, a plan-usage check the docs call temporary) is sent again
+ * after these pauses. With `store: false` the turn left no trace server-side,
+ * so re-sending the same input is safe.
+ */
+export const DEFAULT_RETRY_DELAYS_MS = [2_000, 6_000, 15_000];
 
 /**
  * Everything needed to pick a build up where it stopped. With `store: false`
@@ -216,6 +227,7 @@ export async function runHomepageBuild(opts: OpenAIRunOptions): Promise<Homepage
         fetch: opts.fetch,
         onEvent,
         reasoningEffort: opts.reasoningEffort ?? DEFAULT_REASONING_EFFORT,
+        retryDelaysMs: opts.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS,
       });
       const usage = response.usage;
       emit.log(
@@ -290,10 +302,12 @@ async function requestTurn(ctx: {
   fetch?: typeof fetch;
   onEvent: (event: StreamEvent) => void;
   reasoningEffort: NonNullable<OpenAIRunOptions["reasoningEffort"]>;
+  retryDelaysMs: number[];
 }): Promise<ResponseObject> {
   let accessToken = await ctx.auth.getAccessToken();
   let refreshed = false;
   let adjustments = 0;
+  let retries = 0;
 
   while (true) {
     const delivery = ctx.compat.toolDelivery ?? TOOL_DELIVERY_ORDER[0];
@@ -325,18 +339,41 @@ async function requestTurn(ctx: {
         accessToken = await ctx.auth.getAccessToken({ forceRefresh: true });
         continue;
       }
-      if (err.status === 400 && adjustments < MAX_REQUEST_ADJUSTMENTS) {
+      if (err.isInvalidRequest && adjustments < MAX_REQUEST_ADJUSTMENTS) {
         const change = adaptRequest(err, ctx.compat);
         if (change) {
           adjustments++;
-          ctx.emit.log(`request rejected (${err.code ?? "400"}${err.param ? ` param=${err.param}` : ""}); ${change}`);
+          ctx.emit.log(`request rejected (${err.code ?? err.status ?? "invalid_request"}${err.param ? ` param=${err.param}` : ""}); ${change}`);
           await ctx.store.set(STORAGE_KEYS.apiCompat, ctx.compat);
           continue;
         }
       }
+      if (err.isTransient && retries < ctx.retryDelaysMs.length) {
+        const wait = ctx.retryDelaysMs[retries++]!;
+        ctx.emit.log(`turn failed (${errorDiagnostics(err)}); retrying in ${Math.round(wait / 1000)}s (${retries}/${ctx.retryDelaysMs.length})`);
+        await sleep(wait, ctx.signal);
+        continue;
+      }
+      ctx.emit.log(`turn failed: ${errorDiagnostics(err)}`);
       throw err;
     }
   }
+}
+
+/** setTimeout that gives up when the build is cancelled. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error("aborted"));
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error("aborted"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /**
