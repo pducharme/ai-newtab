@@ -20,6 +20,20 @@ export interface BuildState {
   narration: string;
   logs: string[];
   error: string | null;
+  /** The build stopped for a reason that is not a fault; shown as a notice, not an error. */
+  notice: BuildNotice | null;
+}
+
+/**
+ * `usage-limit`: the ChatGPT plan's allowance for apps is used up
+ * (`subscription_sharing_usage_limit_exceeded`). It resets on its own, so the
+ * page explains it and offers the ways forward instead of reporting a failure.
+ * Kept until the user dismisses it or the next build starts, across worker restarts.
+ */
+export interface BuildNotice {
+  kind: "usage-limit";
+  /** ISO timestamp of when the limit was hit. */
+  at: string;
 }
 
 export const INITIAL_BUILD_STATE: BuildState = {
@@ -30,6 +44,7 @@ export const INITIAL_BUILD_STATE: BuildState = {
   narration: "",
   logs: [],
   error: null,
+  notice: null,
 };
 
 /** What the page needs to know about credentials. Keys and tokens never cross the port. */
@@ -69,6 +84,7 @@ export type PageMsg =
   | { kind: "refreshAuth" } //                  → replies with the auth state (after the page saved a key or switched engine)
   | { kind: "startBuild"; resume?: boolean } // no-op if one is already running
   | { kind: "cancel" }
+  | { kind: "dismissNotice" }
   | { kind: "signIn"; newAccount?: boolean; promptConsent?: boolean } // Sign in with ChatGPT
   | { kind: "cancelSignIn" }
   | { kind: "signOut"; forget?: boolean }
@@ -82,6 +98,7 @@ export type BuildMsg =
   | { kind: "log"; line: string }
   | { kind: "done"; code: string } // homepage saved; carries the raw TSX
   | { kind: "error"; message: string }
+  | { kind: "notice"; notice: BuildNotice } // the build stopped without failing (usage limit)
   | { kind: "auth"; state: AuthState }
   | { kind: "models"; models: ModelInfo[]; error: string | null };
 

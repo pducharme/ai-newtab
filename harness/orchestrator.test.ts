@@ -4,6 +4,7 @@ import {
   OUTPUT_PATH,
   OpenAIError,
   describeOpenAIError,
+  isUsageLimitError,
   runHomepageBuild,
   type BrowserBridge,
   type BuildCheckpoint,
@@ -258,6 +259,7 @@ describe("runHomepageBuild (local loop)", () => {
     const run = runHomepageBuild({ engine: "openai", auth: staticAuth().provider, bridge, store, model: "gpt-test", fetch: api.fetch, retryDelaysMs: [1, 1] });
     const err = await run.catch((e) => e);
     expect(describeOpenAIError(err)).toMatch(/usage limit.*request req_fake/i);
+    expect(isUsageLimitError(err)).toBe(true);
     expect(api.requests).toHaveLength(1);
   });
 
