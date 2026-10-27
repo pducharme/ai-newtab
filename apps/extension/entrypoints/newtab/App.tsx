@@ -27,6 +27,7 @@ import { HomepagePreview } from "./components/HomepagePreview";
 import { SettingsModal } from "./components/SettingsModal";
 import { Setup } from "./components/Setup";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { UsageLimitNotice } from "./components/UsageLimitNotice";
 import { btn, btnQuiet, errorBox } from "./components/ui";
 import { useHomepageBuild } from "./useHomepageBuild";
 
@@ -53,7 +54,7 @@ export default function App() {
   const [theme, setTheme] = useState<ThemePreference>("system");
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => resolveTheme("system"));
 
-  const { state, auth, models, build, cancel, refreshAuth, signIn, cancelSignIn, signOut, loadModels } =
+  const { state, auth, models, build, cancel, dismissNotice, refreshAuth, signIn, cancelSignIn, signOut, loadModels } =
     useHomepageBuild((code) => setRenderedCode(toRenderable(code)));
 
   // Once a build finishes, drop back to the homepage view.
@@ -124,6 +125,16 @@ export default function App() {
     },
     [refreshAuth],
   );
+  /**
+   * From the usage-limit notice: switch the OpenAI engine to API-key billing.
+   * With a key already saved the build starts at once; without one, the setup
+   * screen opens on the OpenAI key field.
+   */
+  const switchToApiKey = useCallback(async () => {
+    const hasKey = Boolean(auth?.openai.apiKeySaved);
+    await chooseOpenAIMode("apiKey");
+    if (hasKey) build();
+  }, [auth, chooseOpenAIMode, build]);
   const saveAnthropicKey = useCallback(
     async (key: string) => {
       await saveSetting("apiKey", key);
@@ -226,6 +237,16 @@ export default function App() {
     />
   );
 
+  // The usage-limit notice only concerns builds billed to the ChatGPT plan.
+  const usageNotice =
+    state.notice?.kind === "usage-limit" && auth.engine === "openai" && auth.openai.mode === "siwc" ? state.notice : null;
+  const noticeProps = usageNotice && {
+    notice: usageNotice,
+    apiKeySaved: auth.openai.apiKeySaved,
+    onUseApiKey: () => void switchToApiKey(),
+    onRetry: () => build(),
+  };
+
   // With no homepage to fall back to, a running build takes over the tab.
   if (state.running && (!renderedCode || viewProgress)) {
     return (
@@ -246,7 +267,8 @@ export default function App() {
           The agent reads your browsing history, opens the pages you actually follow, and writes a
           homepage from what it finds today.
         </p>
-        {state.error && (
+        {noticeProps && <UsageLimitNotice variant="panel" {...noticeProps} />}
+        {!noticeProps && state.error && (
           <div style={{ ...errorBox, margin: "16px 0", padding: 12, borderRadius: 4 }}>
             {state.error}
             <ActivityLog logs={state.logs} />
@@ -305,7 +327,9 @@ export default function App() {
         {themeToggle({ width: 36, height: 36 })}
       </div>
 
-      {showError && (
+      {noticeProps && <UsageLimitNotice variant="banner" onDismiss={dismissNotice} {...noticeProps} />}
+
+      {!noticeProps && showError && (
         <div
           style={{
             ...errorBox,

@@ -7,10 +7,19 @@
  *   3. the worker answers `subscribe` on the build port with a snapshot,
  *   4. `startBuild` with no API key fails cleanly with an error message,
  *   5. `chrome.history` is readable, so the `history` permission is real,
- *   6. the theme toggle cycles system → dark → light, restyles the page and persists.
+ *   6. the theme toggle cycles system → dark → light, restyles the page and persists,
+ *   7. every look can be picked in Settings and is stored,
+ *   8. the link-target setting is offered and stored,
+ *   9. a ChatGPT usage limit hit while a homepage is on screen becomes a
+ *      dismissible banner over it, not an error. (The panel, worker-restart and
+ *      API-key checks run in the engine branch's version of this test. Here they
+ *      would need page reloads, and once the preview has loaded a reload makes
+ *      headless Chrome close the new-tab page and exit.)
  *
- * No API calls are made. Chrome 136+ ignores `--load-extension`, so the
- * extension is loaded over CDP's Extensions domain instead.
+ * No API calls are made: step 9 runs against fake ChatGPT credentials in the
+ * throwaway profile, with the worker's `fetch` stubbed to answer the way the
+ * ChatGPT-plan route does when the limit is reached. Chrome 136+ ignores
+ * `--load-extension`, so the extension is loaded over CDP's Extensions domain instead.
  *
  * Run: pnpm build && pnpm extension:test
  * Set CHROME_PATH if Chrome isn't at the default macOS location.
@@ -271,6 +280,67 @@ try {
     domains.join(", "),
   );
 
+  const shotsDir = join(import.meta.dir, "out");
+  mkdirSync(shotsDir, { recursive: true });
+  const shotTo = async (file: string) => {
+    const r = await page.send("Page.captureScreenshot", { format: "png" });
+    if (r.result?.data) writeFileSync(join(shotsDir, file), Buffer.from(r.result.data, "base64"));
+  };
+  const fakeSignIn = `
+    chrome.storage.local.set({
+      openaiAuthMode: "siwc",
+      siwcCredentials: {
+        email: "tester@example.com",
+        issuer: "https://auth.openai.com",
+        subject: "user-test",
+        clientId: "oaiapp_test",
+        hostId: "urn:uuid:00000000-0000-4000-8000-000000000000",
+        idToken: null,
+        accessToken: "fake-access-token",
+        refreshToken: null,
+        tokenType: "Bearer",
+        expiresAt: new Date(Date.now() + 86400000).toISOString(),
+        scopes: ["openid", "offline_access", "chatgpt.tokens.use.direct"],
+        savedAt: new Date().toISOString(),
+      },
+    })
+  `;
+  // Make the worker answer /v1/responses the way the ChatGPT-plan route did for
+  // a real user at the limit: HTTP 200, then an `error` event with nested details.
+  const stubWorkerFetch = async () => {
+    const targets: any[] = await getJson("/json/list");
+    const target = targets.find((t) => t.type === "service_worker" && t.url.includes(extId));
+    const worker = await cdp(target.webSocketDebuggerUrl);
+    const ok = await worker.evaluate<string>(`
+      (() => {
+        globalThis.__realFetch ??= globalThis.fetch;
+        globalThis.__responsesCalls = 0;
+        globalThis.fetch = async (input, init) => {
+          const url = typeof input === "string" ? input : input.url;
+          if (url.startsWith("https://api.openai.com/v1/responses")) {
+            globalThis.__responsesCalls++;
+            const created = { type: "response.created", response: { id: "resp_test", status: "in_progress", output: [] } };
+            const error = {
+              type: "error",
+              error: {
+                type: "invalid_request_error",
+                code: "subscription_sharing_usage_limit_exceeded",
+                message: "The ChatGPT user has reached their Subscription Sharing usage limit.",
+                param: null,
+              },
+              sequence_number: 3,
+            };
+            const body = "event: response.created\\ndata: " + JSON.stringify(created) + "\\n\\nevent: error\\ndata: " + JSON.stringify(error) + "\\n\\n";
+            return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+          }
+          return globalThis.__realFetch(input, init);
+        };
+        return "patched";
+      })()
+    `);
+    return { worker, ok: ok === "patched" };
+  };
+
   // ---- 6. theme toggle ------------------------------------------------------
   const readTheme = () =>
     page.evaluate<{ attr: string | null; bg: string; toggle: string | null; stored: string | null }>(`
@@ -389,6 +459,41 @@ try {
   await sleep(300);
   const storedTarget = await page.evaluate<string | null>(`chrome.storage.local.get("linkTarget").then((r) => r.linkTarget ?? null)`);
   check("the link-target setting is offered and stored", linkSet && storedTarget === "sameTab", String(storedTarget));
+
+  // ---- 9. usage limit over a homepage: the banner, live (no reload) ------------
+  // The Settings modal is still open from the previous step: switch the engine there.
+  await page.evaluate(fakeSignIn);
+  const engineSet = await page.evaluate<boolean>(`(() => {
+    const sel = [...document.querySelectorAll("select")].find((s) => [...s.options].some((o) => o.value === "openai"));
+    if (!sel) return false;
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(sel, "openai");
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`);
+  await sleep(800);
+  await closeSettings();
+  const { worker: bannerWorker, ok: bannerPatched } = await stubWorkerFetch();
+  await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.title === "Rebuild now")?.click()`);
+  await sleep(4000);
+  bannerWorker.close();
+  const bannerText = await page.evaluate<string>(
+    `document.querySelector('[data-testid="usage-limit-notice"]')?.innerText ?? ""`,
+  );
+  const pageText = await page.evaluate<string>("document.body.innerText");
+  check(
+    "over an existing homepage the limit shows as a banner, the homepage stays",
+    engineSet && bannerPatched && /ChatGPT usage limit reached/.test(bannerText) && /last homepage/.test(bannerText) && !/Build failed/i.test(pageText),
+    bannerText.split("\n")[0]?.slice(0, 70),
+  );
+  await shotTo("usage-limit-banner-light.png");
+  await clickToggle(); // light → system, which is dark in headless Chrome
+  await sleep(400);
+  await shotTo("usage-limit-banner-dark.png");
+  await page.evaluate(`document.querySelector('[data-testid="usage-limit-notice"] button[title="Dismiss"]')?.click()`);
+  await sleep(800);
+  const bannerGone = await page.evaluate<boolean>(`!document.querySelector('[data-testid="usage-limit-notice"]')`);
+  const storedNotice = await page.evaluate<unknown>(`chrome.storage.local.get("buildSnapshot").then((r) => r.buildSnapshot?.notice ?? null)`);
+  check("dismissing the banner removes it and the stored notice", bannerGone && storedNotice === null, JSON.stringify(storedNotice));
 
   page.close();
   browser.close();

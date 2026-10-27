@@ -34,7 +34,9 @@ function reduce(state: BuildState, msg: BuildMsg): BuildState {
     case "done":
       return { ...state, running: false, phase: "done" };
     case "error":
-      return { ...state, running: false, phase: "error", error: msg.message };
+      return { ...state, running: false, phase: "error", error: msg.message, notice: null };
+    case "notice":
+      return { ...state, running: false, phase: null, error: null, notice: msg.notice };
     default:
       return state;
   }
@@ -123,6 +125,10 @@ export function useHomepageBuild(onDone: (code: string) => void) {
   );
 
   const cancel = useCallback(() => post({ kind: "cancel" }), [post]);
+  const dismissNotice = useCallback(() => {
+    setState((s) => ({ ...s, notice: null }));
+    post({ kind: "dismissNotice" });
+  }, [post]);
   /** Ask the worker to re-evaluate credentials after the page saved a key or switched engine. */
   const refreshAuth = useCallback(() => post({ kind: "refreshAuth" }), [post]);
 
@@ -147,5 +153,5 @@ export function useHomepageBuild(onDone: (code: string) => void) {
     [post],
   );
 
-  return { state, auth, models, build, cancel, refreshAuth, signIn, cancelSignIn, signOut, loadModels };
+  return { state, auth, models, build, cancel, dismissNotice, refreshAuth, signIn, cancelSignIn, signOut, loadModels };
 }

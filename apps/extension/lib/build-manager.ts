@@ -6,6 +6,7 @@ import {
   OpenAIError,
   SiwcError,
   describeOpenAIError,
+  isUsageLimitError,
   listModels,
   runHomepageBuild,
   type EngineId,
@@ -21,6 +22,7 @@ import {
   stepForPhase,
   type AuthState,
   type BuildMsg,
+  type BuildNotice,
   type BuildState,
   type PageMsg,
 } from "./protocol";
@@ -84,6 +86,7 @@ export class BuildManager {
   private async onPageMessage(port: Port, msg: PageMsg) {
     switch (msg.kind) {
       case "subscribe":
+        await this.restoreNotice();
         this.send(port, { kind: "snapshot", state: this.state });
         this.send(port, { kind: "auth", state: await this.authState() });
         break;
@@ -95,6 +98,11 @@ export class BuildManager {
         break;
       case "cancel":
         this.cancel();
+        break;
+      case "dismissNotice":
+        this.state = { ...this.state, notice: null };
+        this.broadcast({ kind: "snapshot", state: this.state });
+        await this.mirror(true);
         break;
       case "signIn":
         try {
@@ -311,6 +319,14 @@ export class BuildManager {
       await this.mirror(true);
       console.log("[BuildManager] build done", { engine: result.engine, bytes: result.code.length, source: result.source });
     } catch (error) {
+      if (isUsageLimitError(error)) {
+        // Not a failure: the plan's allowance for apps is used up until it
+        // resets. Per the SIWC docs, stop and point at the usage page; no
+        // "build failed" notification, no retry.
+        await this.pause({ kind: "usage-limit", at: new Date().toISOString() });
+        console.warn("[BuildManager] ChatGPT plan usage limit reached; build paused", error.opts.requestId ?? "");
+        return;
+      }
       await this.fail(describeError(error), { notify: true });
       console.error("[BuildManager] build failed", error);
       // A sign-in that is gone for good is reflected on every tab right away.
@@ -322,8 +338,25 @@ export class BuildManager {
     }
   }
 
+  private async pause(notice: BuildNotice) {
+    this.state = { ...this.state, running: false, phase: null, error: null, notice };
+    this.broadcast({ kind: "notice", notice });
+    await this.mirror(true);
+  }
+
+  /**
+   * A notice must outlive the worker: the morning build can hit the limit with
+   * no tab open, and the worker is unloaded long before the user looks. A fresh
+   * worker with nothing of its own to show picks it up from the stored snapshot.
+   */
+  private async restoreNotice() {
+    if (this.state.running || this.state.phase !== null || this.state.notice) return;
+    const stored = await extensionStore.get<BuildState>(KEYS.buildSnapshot);
+    if (stored?.notice && !stored.running) this.state = { ...this.state, notice: stored.notice };
+  }
+
   private async fail(message: string, opts: { notify: boolean }) {
-    this.state = { ...this.state, running: false, phase: "error", error: message };
+    this.state = { ...this.state, running: false, phase: "error", error: message, notice: null };
     this.broadcast({ kind: "error", message });
     await this.mirror(true);
     if (opts.notify) this.notifyFailure(message);

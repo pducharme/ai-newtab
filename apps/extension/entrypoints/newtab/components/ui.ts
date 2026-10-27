@@ -26,6 +26,14 @@ export const errorBox: CSSProperties = {
   fontSize: 13,
 };
 
+/** Something to know, not a failure (e.g. the ChatGPT usage limit). */
+export const noticeBox: CSSProperties = {
+  background: "var(--notice-bg)",
+  border: "1px solid var(--notice-border)",
+  color: "var(--notice-fg)",
+  fontSize: 13,
+};
+
 export const input: CSSProperties = {
   width: "100%",
   boxSizing: "border-box",

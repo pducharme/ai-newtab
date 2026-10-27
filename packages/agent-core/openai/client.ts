@@ -213,6 +213,16 @@ export const SIWC_ERROR_MESSAGES: Record<string, string> = {
   chatpass_v2_invalid_authorization_context: "Your ChatGPT sign-in does not authorize this request.",
 };
 
+/** The plan's allowance for apps is used up. Not a fault: pause plan requests and point at the usage page. */
+export const USAGE_LIMIT_CODE = "subscription_sharing_usage_limit_exceeded";
+
+/** The usage page the SIWC docs say to link to when the limit is reached. */
+export const CHATGPT_USAGE_URL = "https://chatgpt.com/settings/usage";
+
+export function isUsageLimitError(err: unknown): err is OpenAIError {
+  return err instanceof OpenAIError && err.code === USAGE_LIMIT_CODE;
+}
+
 /** Transient codes: keep credentials, let the user retry later. */
 export const RETRYABLE_SIWC_CODES = new Set([
   "subscription_sharing_usage_unavailable",
