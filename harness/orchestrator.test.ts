@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   OPENAI_STORAGE_KEYS as STORAGE_KEYS,
   OUTPUT_PATH,
+  OpenAIError,
+  describeOpenAIError,
   runHomepageBuild,
   type BrowserBridge,
   type BuildCheckpoint,
@@ -196,6 +198,105 @@ describe("runHomepageBuild (local loop)", () => {
     const run = runHomepageBuild({ engine: "openai", auth: staticAuth().provider, bridge, store, model: "gpt-test", fetch: api.fetch });
     await expect(run).rejects.toThrow(/usage limit/i);
     expect(data.has(STORAGE_KEYS.activeBuild)).toBe(false);
+  });
+
+  test("retries a turn after a mid-stream server error whose details are nested under `error`", async () => {
+    const api = fakeOpenAI([
+      () => ({ streamError: { error: { type: "server_error", code: null, message: "The server had an error while processing your request." } } }),
+      () => ({ output: [call("write", { path: OUTPUT_PATH, content: COMPONENT })] }),
+      () => ({ output: [message("ok")] }),
+    ]);
+    const { store } = memoryStore();
+    const logs: string[] = [];
+    const result = await runHomepageBuild({
+      engine: "openai",
+      auth: staticAuth().provider,
+      bridge,
+      store,
+      model: "gpt-test",
+      fetch: api.fetch,
+      retryDelaysMs: [1, 1],
+      callbacks: { onLog: (l) => logs.push(l) },
+    });
+    expect(result.code).toContain("PersonalizedHomepage");
+    expect(api.requests).toHaveLength(3);
+    // The retried turn re-sends the same history.
+    expect(api.requests[1].input).toEqual(api.requests[0].input);
+    expect(logs.some((l) => /turn failed \(mid-stream type=server_error request=req_fake .*\); retrying in 0s \(1\/2\)/.test(l))).toBe(true);
+  });
+
+  test("retries an error event that carries no details at all", async () => {
+    const api = fakeOpenAI([
+      () => ({ streamError: {} }),
+      () => ({ output: [call("write", { path: OUTPUT_PATH, content: COMPONENT })] }),
+      () => ({ output: [message("ok")] }),
+    ]);
+    const { store } = memoryStore();
+    const result = await runHomepageBuild({ engine: "openai", auth: staticAuth().provider, bridge, store, model: "gpt-test", fetch: api.fetch, retryDelaysMs: [1] });
+    expect(result.turns).toBe(2);
+  });
+
+  test("gives up after the retries with the server's message, code and request ID", async () => {
+    const failing = () => ({ streamError: { error: { type: "server_error", code: "server_error", message: "Upstream overloaded" } } });
+    const api = fakeOpenAI([failing, failing, failing]);
+    const { store, data } = memoryStore();
+    const logs: string[] = [];
+    const run = runHomepageBuild({
+      engine: "openai",
+      auth: staticAuth().provider,
+      bridge,
+      store,
+      model: "gpt-test",
+      fetch: api.fetch,
+      retryDelaysMs: [1, 1],
+      callbacks: { onLog: (l) => logs.push(l) },
+    });
+    const err = await run.catch((e) => e);
+    expect(err).toBeInstanceOf(OpenAIError);
+    expect(describeOpenAIError(err)).toBe("Stream error: Upstream overloaded (server_error, request req_fake)");
+    expect(api.requests).toHaveLength(3);
+    expect(logs.at(-1)).toMatch(/^turn failed: mid-stream type=server_error code=server_error request=req_fake body=/);
+    expect(data.has(STORAGE_KEYS.activeBuild)).toBe(false);
+  });
+
+  test("never retries a usage limit, even when it arrives as a nested error event", async () => {
+    const api = fakeOpenAI([
+      () => ({ streamError: { error: { type: "invalid_request_error", code: "subscription_sharing_usage_limit_exceeded", message: "limit" } } }),
+    ]);
+    const { store } = memoryStore();
+    const run = runHomepageBuild({ engine: "openai", auth: staticAuth().provider, bridge, store, model: "gpt-test", fetch: api.fetch, retryDelaysMs: [1, 1] });
+    const err = await run.catch((e) => e);
+    expect(describeOpenAIError(err)).toMatch(/usage limit.*request req_fake/i);
+    expect(api.requests).toHaveLength(1);
+  });
+
+  test("reshapes the request when the rejection arrives mid-stream instead of as a 400", async () => {
+    const api = fakeOpenAI([
+      () => ({ streamError: { error: { type: "invalid_request_error", code: "subscription_sharing_unsupported_capability", param: "include", message: "unsupported" } } }),
+      (body) => {
+        expect(body.include).toBeUndefined();
+        return { output: [call("write", { path: OUTPUT_PATH, content: COMPONENT })] };
+      },
+      () => ({ output: [message("ok")] }),
+    ]);
+    const { store, data } = memoryStore();
+    await runHomepageBuild({ engine: "openai", auth: staticAuth().provider, bridge, store, model: "gpt-test", fetch: api.fetch, retryDelaysMs: [] });
+    expect(data.get(STORAGE_KEYS.apiCompat)).toEqual({ includeReasoning: false });
+  });
+
+  test("retries a turn whose connection could not be opened", async () => {
+    const api = fakeOpenAI([
+      () => ({ output: [call("write", { path: OUTPUT_PATH, content: COMPONENT })] }),
+      () => ({ output: [message("ok")] }),
+    ]);
+    let attempts = 0;
+    const flaky = (async (input: any, init?: any) => {
+      if (String(input).endsWith("/responses") && attempts++ === 0) throw new TypeError("Failed to fetch");
+      return api.fetch(input, init);
+    }) as typeof fetch;
+    const { store } = memoryStore();
+    const result = await runHomepageBuild({ engine: "openai", auth: staticAuth().provider, bridge, store, model: "gpt-test", fetch: flaky, retryDelaysMs: [1] });
+    expect(result.turns).toBe(2);
   });
 
   test("turns a tool failure into an error output instead of breaking the loop", async () => {
