@@ -27,6 +27,8 @@ export const KEYS = {
   engine: "engine",
   /** Claude model (see MODEL_CHOICES). */
   model: "model",
+  /** Claude: "managed" (Managed Agents, standard price) or "batch" (Message Batches, half price, slower). */
+  claudeApiMode: "claudeApiMode",
   /** OpenAI: "siwc" (ChatGPT plan) or "apiKey". */
   openaiAuthMode: "openaiAuthMode",
   openaiApiKey: "openaiApiKey",
@@ -60,6 +62,8 @@ export interface Settings {
   apiKey: string | null;
   /** Claude model. */
   model: HomepageModel;
+  /** Claude: Managed Agents at standard price, or the Message Batches API at half price and with queue latency. */
+  claudeApiMode: ClaudeApiMode;
   openaiAuthMode: "siwc" | "apiKey";
   openaiApiKey: string | null;
   openaiModel: string | null;
@@ -72,6 +76,8 @@ export interface Settings {
 }
 
 export type LinkTarget = "newTab" | "sameTab";
+
+export type ClaudeApiMode = "managed" | "batch";
 
 export interface ModelCatalog {
   models: ModelInfo[];
@@ -97,6 +103,7 @@ export async function loadSettings(): Promise<Settings> {
     KEYS.engine,
     KEYS.apiKey,
     KEYS.model,
+    KEYS.claudeApiMode,
     KEYS.openaiAuthMode,
     KEYS.openaiApiKey,
     KEYS.openaiModel,
@@ -112,6 +119,7 @@ export async function loadSettings(): Promise<Settings> {
     apiKey: (s[KEYS.apiKey] as string | undefined) ?? null,
     // Fall back if a stored model is no longer offered.
     model: MODEL_CHOICES.find((m) => m.id === model)?.id ?? DEFAULT_MODEL,
+    claudeApiMode: s[KEYS.claudeApiMode] === "batch" ? "batch" : "managed",
     openaiAuthMode: s[KEYS.openaiAuthMode] === "apiKey" ? "apiKey" : "siwc",
     openaiApiKey: (s[KEYS.openaiApiKey] as string | undefined) ?? null,
     openaiModel: (s[KEYS.openaiModel] as string | undefined) ?? null,

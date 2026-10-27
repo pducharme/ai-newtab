@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import {
+  CLAUDE_BATCH_STORAGE_KEYS,
   CLAUDE_STORAGE_KEYS,
   DEFAULT_OPENAI_MODEL,
   OPENAI_STORAGE_KEYS,
@@ -207,6 +208,7 @@ export class BuildManager {
   /** Which engine left a build mid-flight, if any. */
   private async resumableEngine(): Promise<EngineId | null> {
     if (await extensionStore.get<string>(CLAUDE_STORAGE_KEYS.activeSessionId)) return "claude";
+    if (await extensionStore.get<unknown>(CLAUDE_BATCH_STORAGE_KEYS.activeBatchBuild)) return "claude";
     if (await extensionStore.get<unknown>(OPENAI_STORAGE_KEYS.activeBuild)) return "openai";
     return null;
   }
@@ -278,10 +280,18 @@ export class BuildManager {
         // The key is the user's own, read from local storage — there is no server
         // to hide it behind. See ARCHITECTURE.md → Privacy.
         const client = new Anthropic({ apiKey: settings.apiKey, dangerouslyAllowBrowser: true });
-        const resumeSessionId = opts.resume
-          ? await extensionStore.get<string>(CLAUDE_STORAGE_KEYS.activeSessionId)
+        // A batch build left in the queue resumes as a batch build, whatever the toggle says now.
+        const batchCheckpoint = opts.resume
+          ? await extensionStore.get<unknown>(CLAUDE_BATCH_STORAGE_KEYS.activeBatchBuild)
           : undefined;
-        run = { engine: "claude", client, model: settings.model, resumeSessionId, ...common };
+        if (batchCheckpoint || (!opts.resume && settings.claudeApiMode === "batch")) {
+          run = { engine: "claude", apiMode: "batch", client, model: settings.model, resume: Boolean(batchCheckpoint), ...common };
+        } else {
+          const resumeSessionId = opts.resume
+            ? await extensionStore.get<string>(CLAUDE_STORAGE_KEYS.activeSessionId)
+            : undefined;
+          run = { engine: "claude", client, model: settings.model, resumeSessionId, ...common };
+        }
       } else {
         if (!(await openaiReady(settings))) {
           const message =

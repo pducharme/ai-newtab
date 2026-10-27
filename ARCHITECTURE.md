@@ -50,6 +50,39 @@ service worker        Anthropic loop        sandbox
     └─ sessions.delete ────▶│                  │
 ```
 
+### Claude through Message Batches (`agent-core/claude/batch-orchestrator.ts`)
+
+Settings → "Use the Message Batches API" (`claudeApiMode: "batch"`) bills every token at
+half price. Managed Agents sessions can't run through batches, and a batch request is
+single-shot, so this mode runs the agent loop in the worker, like the OpenAI engine, over
+the plain Messages API: every model turn is submitted as a one-request batch, polled until
+it ends, and its `tool_use` blocks run locally against the same in-memory sandbox and
+browser tools (`runTool` from `openai/orchestrator.ts`).
+
+```
+service worker                         Anthropic batch queue
+    ├─ getHistory (chrome.history), before any turn
+    ├─ batches.create([turn 1]) ──────────▶ queued
+    ├─ batches.retrieve … (5 s, 10 s, … 60 s) ─▶ ended
+    ├─ batches.results → tool_use getPageHtml
+    ├─ tabs + scripting → sandbox
+    ├─ batches.create([turn 2: history + tool_results]) ─▶ …
+    ├─ … tool_use write /mnt/session/outputs/homepage.tsx
+    └─ done: no further turn for a closing message
+```
+
+Each turn can wait minutes, so the loop spends as few turns as it can. The history digest
+is read before the first turn and handed over in the kickoff, so no turn goes to
+getHistory. The kickoff asks for wide turns with every independent tool call together.
+The build ends as soon as the homepage file is written. The conversation is append-only,
+with thinking blocks passed back verbatim. Requests carry `cache_control` with the
+1-hour TTL, since turns can be more than five minutes apart, and `effort: "medium"`. The
+checkpoint (`claudeBatchBuild`) holds the transcript, the sandbox and the batch in
+flight. A worker killed mid-wait resumes by polling that same batch, and a cancelled
+build cancels its queued batch. A turn that errors on the server side is submitted
+again, at most twice. A request error, a refusal or an expired batch ends the build with
+a plain message.
+
 ### OpenAI (`agent-core/openai/`)
 
 The worker runs the agent loop itself: one streamed `POST /v1/responses` per turn with
@@ -181,6 +214,7 @@ packages/agent-core/      host-agnostic — imports no chrome.*, browser.*, or n
   claude/
     orchestrator.ts       the Managed Agents session: lifecycle, event loop, tool dispatch, cleanup
     setup.ts              ensureAgent / ensureEnvironment (created once, cached by ID), model choices
+    batch-orchestrator.ts the Message Batches mode: local loop, one batch per turn, polling, checkpoint
   openai/
     orchestrator.ts       the local agent loop over Responses: tool dispatch, checkpoint, fallbacks
     client.ts             Responses client over fetch + SSE, model listing, SIWC error codes
@@ -213,20 +247,21 @@ apps/extension/           MV3 extension (WXT + React)
 harness/                  Bun scripts: drive agent-core with a fixture/fetch bridge, test the extension
   siwc-login.ts           sign in with ChatGPT from the terminal with a real loopback listener
   fake-openai.ts          scripted stand-in for /responses, /models and the token endpoint, for tests
+  claude-batch.test.ts    the Message Batches loop against a scripted stand-in for client.messages.batches
 ```
 
 ## Verification
 
 | Command | Proves |
 |---|---|
-| `pnpm test` | The history digest is capped, ranked, drops `urls[]`, reports `totalSitesSeen`; the site filter through both engines' tool dispatch; the OpenAI loop against a scripted fake API (tool dispatch, sandbox grep/read/glob/write, checkpoint + resume with an orphaned call, 401 → refresh → retry, 400 → tool-delivery fallback, mid-stream `response.failed`); the SIWC request/callback/token contract |
+| `pnpm test` | The history digest is capped, ranked, drops `urls[]`, reports `totalSitesSeen`; the site filter through both engines' tool dispatch; the OpenAI loop against a scripted fake API (tool dispatch, sandbox grep/read/glob/write, checkpoint + resume with an orphaned call, 401 → refresh → retry, 400 → tool-delivery fallback, mid-stream `response.failed`); the Claude Message Batches loop against a scripted batches API (one request per batch, history read up front, stop on write, polling, resume of the batch in flight, cancel, resubmit, request errors, refusal, expiry); the SIWC request/callback/token contract |
 | `pnpm agent:login` | A real Sign in with ChatGPT: registration, PKCE, code exchange, granted scopes |
 | `pnpm agent:models` | `GET /models` with the OpenAI credentials: what they offer |
 | `pnpm agent:run` | Full build against the real API with either engine: tools, sandbox, deliverable, cleanup |
 | `pnpm agent:verify` | The deliverable transforms, evaluates and server-renders |
 | `pnpm agent:resume-test` | (Claude) A build killed with a tool call pending can be reattached and finished |
 | `pnpm agent:retention <sessionId>` | (Claude) The session and every uploaded page body are actually deleted |
-| `pnpm extension:test` | In headless Chrome: worker registers, new tab renders the setup screen, port protocol answers (snapshot + credential state), `chrome.history` reads |
+| `pnpm extension:test` | In headless Chrome: worker registers, new tab renders the setup screen, port protocol answers (snapshot + credential state), `chrome.history` reads, theme, looks, link target, the ChatGPT usage-limit banner, and a Message Batches build end to end in the worker with the batch endpoints stubbed. It prefers a Chrome for Testing build from the Playwright or Puppeteer cache: headless Chrome 156 stable on macOS quits after about 31 s |
 
 The `agent:*` commands need credentials in `.env` (or a `pnpm agent:login`) and spend
 API credits or plan usage. The harness's bridge uses fixture history and a plain

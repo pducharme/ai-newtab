@@ -37,6 +37,11 @@ const UPLOAD_ROOT = "/mnt/session/uploads";
 
 export interface ClaudeRunOptions extends CommonRunOptions {
   engine: "claude";
+  /**
+   * `managed` (default): a Managed Agents session, billed at standard rates.
+   * `batch` runs claude/batch-orchestrator.ts instead (ClaudeBatchRunOptions).
+   */
+  apiMode?: "managed";
   client: Anthropic;
   /** Ignored when resuming: the session keeps the agent (and model) it started with. */
   model?: HomepageModel;

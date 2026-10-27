@@ -11,26 +11,44 @@
  *   7. every look can be picked in Settings and is stored,
  *   8. the link-target setting is offered and stored,
  *   9. a ChatGPT usage limit hit while a homepage is on screen becomes a
- *      dismissible banner over it, not an error. (The panel, worker-restart and
- *      API-key checks run in the engine branch's version of this test. Here they
- *      would need page reloads, and once the preview has loaded a reload makes
- *      headless Chrome close the new-tab page and exit.)
+ *      dismissible banner over it, not an error (the panel, worker-restart and
+ *      API-key checks run in the engine branch's version of this test),
+ *  10. the Claude engine's Message Batches toggle is stored, and a batch-mode
+ *      build runs end to end in the worker: real SDK, real history, real storage.
  *
  * No API calls are made: step 9 runs against fake ChatGPT credentials in the
  * throwaway profile, with the worker's `fetch` stubbed to answer the way the
- * ChatGPT-plan route does when the limit is reached. Chrome 136+ ignores
+ * ChatGPT-plan route does when the limit is reached, and step 10 stubs the
+ * Message Batches endpoints the same way. Chrome 136+ ignores
  * `--load-extension`, so the extension is loaded over CDP's Extensions domain instead.
  *
  * Run: pnpm build && pnpm extension:test
- * Set CHROME_PATH if Chrome isn't at the default macOS location.
+ * Set CHROME_PATH to pick a Chrome. Without it, a Chrome for Testing build left
+ * by Playwright or Puppeteer is preferred over the installed Chrome: headless
+ * sessions of Chrome 156 stable on macOS quit on their own after about 31 s,
+ * which this test outlasts.
  */
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const CHROME =
-  process.env.CHROME_PATH ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const CHROME = process.env.CHROME_PATH ?? chromeForTesting() ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+
+/** A Chrome for Testing build from the Playwright or Puppeteer cache (macOS layout), if there is one. */
+function chromeForTesting(): string | undefined {
+  const home = process.env.HOME ?? "";
+  const roots = [join(home, "Library/Caches/ms-playwright"), join(home, ".cache/puppeteer/chrome")];
+  const found: string[] = [];
+  for (const root of roots) {
+    if (!existsSync(root)) continue;
+    for (const dir of readdirSync(root)) {
+      const app = join(root, dir, "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing");
+      if (existsSync(app)) found.push(app);
+    }
+  }
+  return found.sort().at(-1);
+}
 const EXT = join(import.meta.dir, "../apps/extension/.output/chrome-mv3");
 const PORT = 9333;
 
@@ -494,6 +512,97 @@ try {
   const bannerGone = await page.evaluate<boolean>(`!document.querySelector('[data-testid="usage-limit-notice"]')`);
   const storedNotice = await page.evaluate<unknown>(`chrome.storage.local.get("buildSnapshot").then((r) => r.buildSnapshot?.notice ?? null)`);
   check("dismissing the banner removes it and the stored notice", bannerGone && storedNotice === null, JSON.stringify(storedNotice));
+
+  // ---- 10. Claude through Message Batches, end to end in the worker ---------
+  // The real SDK in the real worker, with only the network stubbed: create a
+  // one-request batch, poll it, fetch results_url and decode the JSONL.
+  await openSettings();
+  await sleep(300);
+  const engineBack = await page.evaluate<boolean>(`(() => {
+    const sel = [...document.querySelectorAll("select")].find((s) => [...s.options].some((o) => o.value === "claude"));
+    if (!sel) return false;
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(sel, "claude");
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`);
+  await sleep(800);
+  await page.evaluate(`document.querySelector('[data-testid="claude-batch-toggle"]')?.click()`);
+  await sleep(300);
+  const batchMode = await page.evaluate<string | null>(`chrome.storage.local.get("claudeApiMode").then((r) => r.claudeApiMode ?? null)`);
+  const batchHelp = await page.evaluate<string>("document.body.innerText");
+  check(
+    "Settings offers the Message Batches toggle for Claude and stores it",
+    engineBack && batchMode === "batch" && /batch queue/.test(batchHelp),
+    String(batchMode),
+  );
+  await closeSettings();
+
+  const anthropicTargets: any[] = await getJson("/json/list");
+  const anthropicTarget = anthropicTargets.find((t) => t.type === "service_worker" && t.url.includes(extId));
+  const anthropicWorker = await cdp(anthropicTarget.webSocketDebuggerUrl);
+  await anthropicWorker.evaluate(`
+    (() => {
+      const previous = globalThis.fetch;
+      globalThis.__batch = { creates: [], retrieves: 0, results: 0, apiKey: null };
+      const component = "import React from 'react';\\nexport default function PersonalizedHomepage() { return <main data-part=\\"page\\"><h1>BATCH_E2E_MARKER</h1></main>; }";
+      const batchObject = (status) => ({
+        id: "msgbatch_e2e", type: "message_batch", processing_status: status,
+        request_counts: { processing: status === "ended" ? 0 : 1, succeeded: status === "ended" ? 1 : 0, errored: 0, canceled: 0, expired: 0 },
+        created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 86400000).toISOString(),
+        ended_at: status === "ended" ? new Date().toISOString() : null, cancel_initiated_at: null, archived_at: null,
+        results_url: status === "ended" ? "https://api.anthropic.com/v1/messages/batches/msgbatch_e2e/results" : null,
+      });
+      globalThis.fetch = async (input, init) => {
+        const url = typeof input === "string" ? input : input.url;
+        if (!url.startsWith("https://api.anthropic.com/v1/messages/batches")) return previous(input, init);
+        const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json", "request-id": "req_e2e" } });
+        if (url.endsWith("/v1/messages/batches") && (init?.method ?? "GET") === "POST") {
+          globalThis.__batch.apiKey = new Headers(init.headers).get("x-api-key");
+          globalThis.__batch.creates.push(JSON.parse(init.body));
+          return json(batchObject("in_progress"));
+        }
+        if (url.endsWith("/results")) {
+          globalThis.__batch.results++;
+          const customId = globalThis.__batch.creates.at(-1).requests[0].custom_id;
+          const line = JSON.stringify({ custom_id: customId, result: { type: "succeeded", message: {
+            id: "msg_e2e", type: "message", role: "assistant", model: "claude-sonnet-5-5",
+            content: [{ type: "tool_use", id: "toolu_e2e", name: "write", input: { path: "/mnt/session/outputs/homepage.tsx", content: component } }],
+            stop_reason: "tool_use", stop_sequence: null,
+            usage: { input_tokens: 1200, output_tokens: 80, cache_read_input_tokens: 0, cache_creation_input_tokens: 900 },
+          } } });
+          return new Response(line + "\\n", { status: 200, headers: { "content-type": "application/binary" } });
+        }
+        globalThis.__batch.retrieves++;
+        // In the queue on the first look, ended on the next ones.
+        return json(batchObject(globalThis.__batch.retrieves > 1 ? "ended" : "in_progress"));
+      };
+      return "stubbed";
+    })()
+  `);
+  await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.title === "Rebuild now")?.click()`);
+  let built = "";
+  for (let i = 0; i < 30 && !built.includes("BATCH_E2E_MARKER"); i++) {
+    await sleep(1000);
+    built = await page.evaluate<string>(`chrome.storage.local.get("homepageData").then((r) => r.homepageData?.code ?? "")`);
+  }
+  const traffic = await anthropicWorker.evaluate<any>(`globalThis.__batch`);
+  anthropicWorker.close();
+  const params = traffic?.creates?.[0]?.requests?.[0]?.params;
+  check(
+    "a batch-mode build runs in the worker: one-request batch, polled, results decoded, homepage saved",
+    built.includes("BATCH_E2E_MARKER") &&
+      traffic.creates.length === 1 &&
+      traffic.creates[0].requests.length === 1 &&
+      traffic.retrieves >= 2 &&
+      traffic.results === 1 &&
+      traffic.apiKey === "sk-ant-test" &&
+      params?.cache_control?.ttl === "1h" &&
+      params?.tools?.length === 6 &&
+      /getHistory result/.test(params?.messages?.[0]?.content ?? ""),
+    JSON.stringify({ creates: traffic?.creates?.length, retrieves: traffic?.retrieves, results: traffic?.results, saved: built.includes("BATCH_E2E_MARKER") }),
+  );
+  const leftover = await page.evaluate<unknown>(`chrome.storage.local.get("claudeBatchBuild").then((r) => r.claudeBatchBuild ?? null)`);
+  check("the finished batch build leaves no checkpoint behind", leftover === null);
 
   page.close();
   browser.close();

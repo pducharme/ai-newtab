@@ -21,4 +21,11 @@ export * from "./openai/siwc";
 export * from "./openai/client";
 export * from "./openai/sandbox";
 export * from "./openai/tools";
+export {
+  CLAUDE_BATCH_STORAGE_KEYS,
+  ANTHROPIC_TOOLS,
+  DEFAULT_POLL_INTERVALS_MS,
+  unansweredToolUses,
+  type ClaudeBatchCheckpoint,
+} from "./claude/batch-orchestrator";
 export { OPENAI_STORAGE_KEYS, DEFAULT_REASONING_EFFORT, DEFAULT_RETRY_DELAYS_MS, unansweredCalls, type BuildCheckpoint, type ApiCompat } from "./openai/orchestrator";

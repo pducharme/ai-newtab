@@ -40,7 +40,7 @@ const STORAGE_KEYS = OPENAI_STORAGE_KEYS;
 export const DEFAULT_REASONING_EFFORT = "medium" as const;
 
 /** Callbacks with the optionality resolved, so call sites don't repeat `?.`. */
-interface Emit {
+export interface Emit {
   phase(phase: RunPhase, detail?: string): void;
   text(chunk: string): void;
   log(line: string): void;
@@ -407,7 +407,10 @@ function adaptRequest(err: OpenAIError, compat: ApiCompat): string | null {
 // tools
 // ---------------------------------------------------------------------------
 
-function phaseForTool(name: string): RunPhase {
+// The tool runtime below is engine-neutral: the Claude batch loop
+// (claude/batch-orchestrator.ts) drives the same tools over the same sandbox.
+
+export function phaseForTool(name: string): RunPhase {
   switch (name) {
     case "getHistory":
       return "history";
@@ -420,14 +423,14 @@ function phaseForTool(name: string): RunPhase {
   }
 }
 
-interface ToolContext {
+export interface ToolContext {
   bridge: BrowserBridge;
   sandbox: Sandbox;
   emit: Emit;
   blockedSites: string[];
 }
 
-async function runTool(name: ToolName, args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
+export async function runTool(name: ToolName, args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
   switch (name) {
     case "getHistory":
       return JSON.stringify(await runGetHistory(args, ctx));
@@ -565,7 +568,7 @@ function stripFence(text: string): string {
   return (fenced ? fenced[1] : text).trim();
 }
 
-function collectDeliverable(
+export function collectDeliverable(
   sandbox: Sandbox,
   finalMessage: string,
   emit: Emit,

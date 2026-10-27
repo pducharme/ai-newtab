@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import {
+  CLAUDE_BATCH_STORAGE_KEYS,
   CLAUDE_STORAGE_KEYS,
   DEFAULT_MODEL,
   DEFAULT_BLOCKED_SITES,
@@ -10,7 +11,7 @@ import {
   type SkinId,
 } from "@homepage/agent-core";
 import { BUILD_STEPS, type AuthState } from "@/lib/protocol";
-import { extensionStore, loadHomepage, loadSettings, saveSetting, type LinkTarget } from "@/lib/storage";
+import { extensionStore, loadHomepage, loadSettings, saveSetting, type ClaudeApiMode, type LinkTarget } from "@/lib/storage";
 import {
   applyTheme,
   loadThemePreference,
@@ -36,6 +37,7 @@ export default function App() {
   const [systemPrompt, setSystemPrompt] = useState("");
   const [blockedSites, setBlockedSites] = useState<string[]>(DEFAULT_BLOCKED_SITES);
   const [model, setModel] = useState<HomepageModel>(DEFAULT_MODEL);
+  const [claudeApiMode, setClaudeApiMode] = useState<ClaudeApiMode>("managed");
   const [openaiModel, setOpenaiModel] = useState<string | null>(null);
   /** The look applied over the generated page; null = as built. */
   const [skin, setSkin] = useState<SkinId | null>(null);
@@ -89,20 +91,22 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        const [settings, homepage, activeSession, checkpoint] = await Promise.all([
+        const [settings, homepage, activeSession, checkpoint, batchCheckpoint] = await Promise.all([
           loadSettings(),
           loadHomepage(),
           extensionStore.get<string>(CLAUDE_STORAGE_KEYS.activeSessionId),
           extensionStore.get<unknown>(OPENAI_STORAGE_KEYS.activeBuild),
+          extensionStore.get<unknown>(CLAUDE_BATCH_STORAGE_KEYS.activeBatchBuild),
         ]);
         setSystemPrompt(settings.systemPrompt);
         setBlockedSites(settings.blockedSites);
         setModel(settings.model);
+        setClaudeApiMode(settings.claudeApiMode);
         setOpenaiModel(settings.openaiModel);
         setSkin(settings.skin);
         setLinkTarget(settings.linkTarget);
         setAutoRebuild(settings.autoRebuild);
-        setResumable(Boolean(activeSession || checkpoint));
+        setResumable(Boolean(activeSession || checkpoint || batchCheckpoint));
         if (homepage?.code) setRenderedCode(toRenderable(homepage.code));
       } finally {
         setLoading(false);
@@ -170,6 +174,10 @@ export default function App() {
   );
 
   // These persist immediately; the worker reads them on its next heartbeat or build.
+  const changeClaudeApiMode = useCallback(async (next: ClaudeApiMode) => {
+    setClaudeApiMode(next);
+    await saveSetting("claudeApiMode", next);
+  }, []);
   const changeModel = useCallback(async (next: HomepageModel) => {
     setModel(next);
     await saveSetting("model", next);
@@ -219,6 +227,8 @@ export default function App() {
       onChangeEngine={chooseEngine}
       model={model}
       onChangeModel={changeModel}
+      claudeApiMode={claudeApiMode}
+      onChangeClaudeApiMode={changeClaudeApiMode}
       onChangeOpenAIMode={chooseOpenAIMode}
       openaiModel={openaiModel}
       models={models}

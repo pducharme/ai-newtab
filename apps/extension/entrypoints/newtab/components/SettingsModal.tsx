@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ENGINES, MODEL_CHOICES, SKINS, findSkin, normalizeBlockList, type EngineId, type HomepageModel, type SkinId } from "@homepage/agent-core";
 import type { AuthState } from "@/lib/protocol";
-import type { LinkTarget } from "@/lib/storage";
+import type { ClaudeApiMode, LinkTarget } from "@/lib/storage";
 import type { ModelsState } from "../useHomepageBuild";
 import { btn, btnQuiet } from "./ui";
 
@@ -15,6 +15,8 @@ export function SettingsModal({
   onChangeEngine,
   model,
   onChangeModel,
+  claudeApiMode,
+  onChangeClaudeApiMode,
   onChangeOpenAIMode,
   openaiModel,
   models,
@@ -38,6 +40,9 @@ export function SettingsModal({
   /** Claude model. */
   model: HomepageModel;
   onChangeModel: (next: HomepageModel) => void;
+  /** Claude: Managed Agents (standard price) or the Message Batches API (half price, slower). */
+  claudeApiMode: ClaudeApiMode;
+  onChangeClaudeApiMode: (next: ClaudeApiMode) => void;
   onChangeOpenAIMode: (next: AuthState["openai"]["mode"]) => void;
   openaiModel: string | null;
   models: ModelsState;
@@ -167,6 +172,22 @@ export function SettingsModal({
                   ))}
                 </select>
               </label>
+              <label
+                style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, color: "var(--fg)", fontSize: 14, cursor: "pointer" }}
+              >
+                <input
+                  type="checkbox"
+                  data-testid="claude-batch-toggle"
+                  checked={claudeApiMode === "batch"}
+                  onChange={(e) => onChangeClaudeApiMode(e.target.checked ? "batch" : "managed")}
+                />
+                Use the Message Batches API: half price, slower
+              </label>
+              <p style={{ color: "var(--faint)", fontSize: 12, margin: "6px 0 0" }}>
+                {claudeApiMode === "batch"
+                  ? "Every step of the build waits in Anthropic's batch queue, usually a few minutes, at most 24 hours. The build carries on in the background and the homepage appears when it is done."
+                  : "Off: builds run as a Managed Agents session at the standard price, in a few minutes."}
+              </p>
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12, fontSize: 14, color: "var(--fg)" }}>
                 <span style={{ flex: 1 }}>Anthropic API key: <b>{auth.claudeReady ? "saved" : "missing"}</b></span>
                 <button onClick={onForgetKey} style={quiet}>

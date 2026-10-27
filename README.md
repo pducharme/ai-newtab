@@ -110,6 +110,15 @@ model writes your page:
 - **Claude Haiku 5.5**: the fastest and cheapest.
 - **Claude Opus 5.5**: the most careful editor, and the most expensive.
 
+**Message Batches (Claude).** The toggle under the Claude model, **Use the Message
+Batches API: half price, slower**, sends builds through Anthropic's
+[Message Batches API](https://platform.claude.com/docs/en/build-with-claude/batch-processing),
+which bills every token at half the standard price. In exchange, each step of the build
+waits in Anthropic's batch queue: usually a few minutes, at most 24 hours. A build takes a
+handful of steps, so start it and let it run; the homepage appears when it is done, and the
+morning edition works the same way. Off, builds run as a Managed Agents session at the
+standard price.
+
 With OpenAI, the list comes from `GET /v1/models` with your credentials: the models your
 plan or organization offers, in OpenAI's order. The first one is the default. The new
 model takes effect from your next build.
