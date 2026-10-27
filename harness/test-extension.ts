@@ -22,15 +22,31 @@
  * `--load-extension`, so the extension is loaded over CDP's Extensions domain instead.
  *
  * Run: pnpm build && pnpm extension:test
- * Set CHROME_PATH if Chrome isn't at the default macOS location.
+ * Set CHROME_PATH to pick a Chrome. Without it, a Chrome for Testing build left
+ * by Playwright or Puppeteer is preferred over the installed Chrome: headless
+ * sessions of Chrome 156 stable on macOS quit on their own after about 31 s.
  */
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const CHROME =
-  process.env.CHROME_PATH ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const CHROME = process.env.CHROME_PATH ?? chromeForTesting() ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+
+/** A Chrome for Testing build from the Playwright or Puppeteer cache (macOS layout), if there is one. */
+function chromeForTesting(): string | undefined {
+  const home = process.env.HOME ?? "";
+  const roots = [join(home, "Library/Caches/ms-playwright"), join(home, ".cache/puppeteer/chrome")];
+  const found: string[] = [];
+  for (const root of roots) {
+    if (!existsSync(root)) continue;
+    for (const dir of readdirSync(root)) {
+      const app = join(root, dir, "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing");
+      if (existsSync(app)) found.push(app);
+    }
+  }
+  return found.sort().at(-1);
+}
 const EXT = join(import.meta.dir, "../apps/extension/.output/chrome-mv3");
 const PORT = 9333;
 
