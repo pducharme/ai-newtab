@@ -30,9 +30,11 @@ import { Setup } from "./components/Setup";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { UsageLimitNotice } from "./components/UsageLimitNotice";
 import { btn, btnQuiet, errorBox } from "./components/ui";
+import { useI18n } from "./i18n";
 import { useHomepageBuild } from "./useHomepageBuild";
 
 export default function App() {
+  const { t } = useI18n();
   const [loading, setLoading] = useState(true);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [blockedSites, setBlockedSites] = useState<string[]>(DEFAULT_BLOCKED_SITES);
@@ -199,7 +201,7 @@ export default function App() {
     await saveSetting("autoRebuild", next);
   }, []);
 
-  if (loading || auth === null) return <div style={{ padding: 20, textAlign: "center" }}>Loading…</div>;
+  if (loading || auth === null) return <div style={{ padding: 20, textAlign: "center" }}>{t("app.loading")}</div>;
 
   if (!auth.ready) {
     return (
@@ -272,11 +274,8 @@ export default function App() {
     return (
       <div style={{ maxWidth: 560, margin: "14vh auto", padding: 24, fontFamily: "system-ui" }}>
         {fixedToggle}
-        <h1 style={{ fontSize: 26 }}>Build your homepage</h1>
-        <p style={{ color: "var(--muted)", lineHeight: 1.6 }}>
-          The agent reads your browsing history, opens the pages you actually follow, and writes a
-          homepage from what it finds today.
-        </p>
+        <h1 style={{ fontSize: 26 }}>{t("home.title")}</h1>
+        <p style={{ color: "var(--muted)", lineHeight: 1.6 }}>{t("home.intro")}</p>
         {noticeProps && <UsageLimitNotice variant="panel" {...noticeProps} />}
         {!noticeProps && state.error && (
           <div style={{ ...errorBox, margin: "16px 0", padding: 12, borderRadius: 4 }}>
@@ -286,15 +285,15 @@ export default function App() {
         )}
         <div style={{ display: "flex", gap: 12, marginTop: 16, alignItems: "center" }}>
           <button style={btn} onClick={() => build()}>
-            Build today&apos;s homepage
+            {t("home.build")}
           </button>
           {resumable && (
             <button style={btnQuiet} onClick={() => build({ resume: true })}>
-              Resume interrupted build
+              {t("home.resume")}
             </button>
           )}
           <button style={btnQuiet} onClick={() => setShowSettings(true)}>
-            ⚙️ Settings
+            ⚙️ {t("common.settings")}
           </button>
         </div>
         {settingsModal}
@@ -313,7 +312,7 @@ export default function App() {
           <button
             style={{ ...btn, backgroundColor: "var(--success)", color: "#fff", display: "flex", alignItems: "center", gap: 8 }}
             onClick={() => setViewProgress(true)}
-            title="View build progress"
+            title={t("toolbar.viewProgress")}
           >
             <span
               style={{
@@ -324,15 +323,15 @@ export default function App() {
                 animation: "hb-pulse 1.2s ease-in-out infinite",
               }}
             />
-            Building… {Math.min(state.stepIndex + 1, BUILD_STEPS.length)}/{BUILD_STEPS.length}
+            {t("toolbar.building", { step: Math.min(state.stepIndex + 1, BUILD_STEPS.length), total: BUILD_STEPS.length })}
           </button>
         ) : (
-          <button style={btn} onClick={() => build()} title="Rebuild now">
-            ↻ Rebuild
+          <button style={btn} onClick={() => build()} title={t("toolbar.rebuildNow")}>
+            ↻ {t("toolbar.rebuild")}
           </button>
         )}
-        <button style={btn} onClick={() => setShowSettings(true)} title="Customize homepage">
-          ⚙️ Settings
+        <button style={btn} onClick={() => setShowSettings(true)} title={t("toolbar.customize")}>
+          ⚙️ {t("common.settings")}
         </button>
         {themeToggle({ width: 36, height: 36 })}
       </div>
@@ -356,11 +355,11 @@ export default function App() {
           }}
         >
           <span style={{ flex: 1 }}>
-            <b>Build failed.</b> {state.error}
+            <b>{t("error.buildFailed")}</b> {state.error}
             <ActivityLog logs={state.logs} />
           </span>
           <button style={{ ...btn, padding: "4px 10px", backgroundColor: "var(--danger-strong)", color: "#fff" }} onClick={() => build()}>
-            Retry
+            {t("error.retry")}
           </button>
           <button
             onClick={() => setDismissedError(state.error)}
@@ -372,7 +371,7 @@ export default function App() {
               fontSize: 16,
               lineHeight: 1,
             }}
-            title="Dismiss"
+            title={t("common.dismiss")}
           >
             ✕
           </button>
@@ -388,10 +387,11 @@ export default function App() {
 
 /** The tail of the worker's log, folded under an error so a failure can be reported with context. */
 function ActivityLog({ logs }: { logs: string[] }) {
+  const { t } = useI18n();
   if (logs.length === 0) return null;
   return (
     <details style={{ marginTop: 8 }}>
-      <summary style={{ cursor: "pointer", fontSize: 12 }}>Activity log ({logs.length} lines)</summary>
+      <summary style={{ cursor: "pointer", fontSize: 12 }}>{t("error.activityLog", { count: logs.length })}</summary>
       <pre
         style={{
           margin: "6px 0 0",

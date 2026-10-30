@@ -206,6 +206,22 @@ cross-origin, so its bootstrap receives the preference baked in and over `postMe
 on change, and sets the same `data-theme` on its own `<html>`; the component contract
 asks the model to honour it.
 
+### Interface language
+
+`lib/i18n/` holds one catalog per language (`locales/<code>.ts`) and a small translator
+with no DOM or React, so the page and the worker share it. English is the source and the
+fallback per key; plurals go through `Intl.PluralRules`, numbers and dates through `Intl`.
+The preference (`auto` or a code) is a setting like any other: the page's provider
+(`entrypoints/newtab/i18n.tsx`) follows it live through `storage.onChanged`, sets
+`<html lang>` and the tab title, and mirrors it to `localStorage` for the first paint, like
+the theme. The worker translates only what it writes itself (missing credentials,
+"cancelled", the failure notification); engine and API error details stay as sent.
+Progress details come from `agent-core` in English for the logs, with a `PhaseInfo`
+alongside (days, pages, batch wait) that the page words in its own language.
+`wxt.config.ts` generates `_locales/<code>/messages.json` from each catalog's `manifest.*`
+keys, so Chrome shows the extension's name in its own UI language. How to add a language:
+[`lib/i18n/README.md`](./apps/extension/lib/i18n/README.md).
+
 ## Layout
 
 ```
@@ -231,7 +247,7 @@ apps/extension/           MV3 extension (WXT + React)
   entrypoints/
     background.ts         service worker: hosts BuildManager, alarm heartbeat, OAuth callback listeners
     scraper.content.ts    injected into scraped tabs: scroll, return HTML
-    newtab/               the new-tab UI (thin client onto the worker)
+    newtab/               the new-tab UI (thin client onto the worker); i18n.tsx: the language as React context
   lib/
     build-manager.ts      single-flight build host, engine switch, broadcast, keepalive, resume, credentials front door
     openai-auth.ts        the OpenAI engine's credentials: ChatGPT plan (siwc-auth) or API key
@@ -242,26 +258,29 @@ apps/extension/           MV3 extension (WXT + React)
     protocol.ts           page ↔ worker messages, credential state, the five UI build steps
     auto-rebuild.ts       when to rebuild on a schedule
     storage.ts            every chrome.storage key, settings, saved homepage, model catalog
+    i18n/                 interface translations: locales/<code>.ts catalogs, the translator, audit.ts for the checks
     transpile.ts          TSX → JS for the preview
 
 harness/                  Bun scripts: drive agent-core with a fixture/fetch bridge, test the extension
   siwc-login.ts           sign in with ChatGPT from the terminal with a real loopback listener
   fake-openai.ts          scripted stand-in for /responses, /models and the token endpoint, for tests
   claude-batch.test.ts    the Message Batches loop against a scripted stand-in for client.messages.batches
+  i18n-check.ts           pnpm i18n:check: coverage per language, missing messages ready to paste
 ```
 
 ## Verification
 
 | Command | Proves |
 |---|---|
-| `pnpm test` | The history digest is capped, ranked, drops `urls[]`, reports `totalSitesSeen`; the site filter through both engines' tool dispatch; the OpenAI loop against a scripted fake API (tool dispatch, sandbox grep/read/glob/write, checkpoint + resume with an orphaned call, 401 → refresh → retry, 400 → tool-delivery fallback, mid-stream `response.failed`); the Claude Message Batches loop against a scripted batches API (one request per batch, history read up front, stop on write, polling, resume of the batch in flight, cancel, resubmit, request errors, refusal, expiry); the SIWC request/callback/token contract |
+| `pnpm test` | The history digest is capped, ranked, drops `urls[]`, reports `totalSitesSeen`; the site filter through both engines' tool dispatch; the OpenAI loop against a scripted fake API (tool dispatch, sandbox grep/read/glob/write, checkpoint + resume with an orphaned call, 401 → refresh → retry, 400 → tool-delivery fallback, mid-stream `response.failed`); the Claude Message Batches loop against a scripted batches API (one request per batch, history read up front, stop on write, polling, resume of the batch in flight, cancel, resubmit, request errors, refusal, expiry); the SIWC request/callback/token contract; every catalog against English (placeholders, tags, plural categories, Chrome's name and description limits, French typography), French complete, language resolution, plurals, fallback |
+| `pnpm i18n:check` | Coverage per language; lists missing messages with their English text; exits 1 on a placeholder, tag or plural mistake |
 | `pnpm agent:login` | A real Sign in with ChatGPT: registration, PKCE, code exchange, granted scopes |
 | `pnpm agent:models` | `GET /models` with the OpenAI credentials: what they offer |
 | `pnpm agent:run` | Full build against the real API with either engine: tools, sandbox, deliverable, cleanup |
 | `pnpm agent:verify` | The deliverable transforms, evaluates and server-renders |
 | `pnpm agent:resume-test` | (Claude) A build killed with a tool call pending can be reattached and finished |
 | `pnpm agent:retention <sessionId>` | (Claude) The session and every uploaded page body are actually deleted |
-| `pnpm extension:test` | In headless Chrome: worker registers, new tab renders the setup screen, port protocol answers (snapshot + credential state), `chrome.history` reads, theme, looks, link target, the ChatGPT usage-limit banner, and a Message Batches build end to end in the worker with the batch endpoints stubbed. It prefers a Chrome for Testing build from the Playwright or Puppeteer cache: headless Chrome 156 stable on macOS quits after about 31 s |
+| `pnpm extension:test` | In headless Chrome: worker registers, new tab renders the setup screen, port protocol answers (snapshot + credential state), `chrome.history` reads, theme, looks, link target, the ChatGPT usage-limit banner, a Message Batches build end to end in the worker with the batch endpoints stubbed, and the interface language (generated `_locales`, live switch, reload, the worker's own messages, `auto` under an emulated fr-CA browser). Chrome runs with `--accept-lang=en-US` so the checks read the same on any machine. It prefers a Chrome for Testing build from the Playwright or Puppeteer cache: headless Chrome 156 stable on macOS quits after about 31 s |
 
 The `agent:*` commands need credentials in `.env` (or a `pnpm agent:login`) and spend
 API credits or plan usage. The harness's bridge uses fixture history and a plain

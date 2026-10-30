@@ -148,6 +148,11 @@ follow a look from their next build.
 (screen, moon, sun). It restyles the extension's own screens and tells the generated page which
 scheme you forced; pages built from now on honour it, older ones follow the system.
 
+**Language.** The extension's screens are in English and French, and follow the browser's
+language until you pick one in Settings → **Language**. The homepage itself is written by the
+agent: to get it in a given language, say so in your standing instructions. Adding a language
+is one file; see [apps/extension/lib/i18n/README.md](./apps/extension/lib/i18n/README.md).
+
 ## Good to know
 
 - **Cost.** With an API key, each build is billed to that key; what it costs depends
@@ -209,6 +214,7 @@ pnpm dev                 # WXT with hot reload
 pnpm typecheck           # all packages
 pnpm test                # unit tests (no API calls; needs Bun)
 pnpm extension:test      # loads the built extension into headless Chrome (no API calls)
+pnpm i18n:check          # translation coverage per language, and what is missing
 
 cp .env.example .env     # add ANTHROPIC_API_KEY or OPENAI_API_KEY, or:
 pnpm agent:login         # sign in with ChatGPT from the terminal (real loopback listener)

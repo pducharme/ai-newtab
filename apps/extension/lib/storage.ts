@@ -11,6 +11,7 @@ import {
   type SkinId,
   findSkin,
 } from "@homepage/agent-core";
+import { normalizePreference, type LanguagePreference } from "./i18n";
 
 /**
  * Everything the extension persists, in one place. All of it lives in
@@ -47,6 +48,8 @@ export const KEYS = {
   skin: "skin",
   /** Where a plain click on a homepage link goes: "newTab" (default) or "sameTab". */
   linkTarget: "linkTarget",
+  /** Interface language: a locale code from lib/i18n, or "auto" (absent) to follow the browser. */
+  language: "language",
 } as const;
 
 export interface Homepage {
@@ -73,6 +76,7 @@ export interface Settings {
   autoRebuild: boolean;
   skin: SkinId | null;
   linkTarget: LinkTarget;
+  language: LanguagePreference;
 }
 
 export type LinkTarget = "newTab" | "sameTab";
@@ -112,6 +116,7 @@ export async function loadSettings(): Promise<Settings> {
     KEYS.autoRebuild,
     KEYS.skin,
     KEYS.linkTarget,
+    KEYS.language,
   ]);
   const model = s[KEYS.model] as string | undefined;
   return {
@@ -128,6 +133,7 @@ export async function loadSettings(): Promise<Settings> {
     autoRebuild: s[KEYS.autoRebuild] !== false,
     skin: findSkin(s[KEYS.skin] as string | undefined)?.id ?? null,
     linkTarget: s[KEYS.linkTarget] === "sameTab" ? "sameTab" : "newTab",
+    language: normalizePreference(s[KEYS.language]),
   };
 }
 

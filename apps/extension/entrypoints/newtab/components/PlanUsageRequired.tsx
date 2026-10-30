@@ -1,4 +1,5 @@
 import type { AuthState } from "@/lib/protocol";
+import { useI18n } from "../i18n";
 import { btn, btnQuiet, errorBox } from "./ui";
 
 /**
@@ -14,22 +15,22 @@ export function PlanUsageRequired({
   onEnable: () => void;
   onSignOut: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div>
-      <h2 style={{ fontSize: 20, marginTop: 0 }}>Allow ChatGPT plan usage</h2>
+      <h2 style={{ fontSize: 20, marginTop: 0 }}>{t("planUsage.title")}</h2>
       <p style={{ color: "var(--muted)", lineHeight: 1.6 }}>
-        You are signed in{auth.email ? ` as ${auth.email}` : ""}, but this app was not allowed to use your
-        ChatGPT plan for requests. Building a homepage needs that permission.
+        {auth.email ? t("planUsage.bodyAs", { email: auth.email }) : t("planUsage.body")}
       </p>
       {auth.error && (
         <div style={{ ...errorBox, margin: "16px 0", padding: 12, borderRadius: 4 }}>{auth.error}</div>
       )}
       <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
         <button style={{ ...btn, backgroundColor: "var(--fg)", color: "var(--bg)" }} onClick={onEnable} disabled={auth.pending}>
-          {auth.pending ? "Waiting for ChatGPT…" : "Enable ChatGPT plan usage"}
+          {auth.pending ? t("planUsage.waiting") : t("planUsage.enable")}
         </button>
         <button style={btnQuiet} onClick={onSignOut}>
-          Sign out
+          {t("common.signOut")}
         </button>
       </div>
     </div>

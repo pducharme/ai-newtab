@@ -148,9 +148,16 @@ describe("Claude engine through Message Batches", () => {
     const { client, log } = fakeBatches([() => ({ content: [toolUse("write", { path: OUTPUT_PATH, content: COMPONENT })] })], { pollsBeforeEnd: 3 });
     const { store } = memoryStore();
     const details: string[] = [];
-    await run(client, store, { callbacks: { onPhase: (_p: string, d?: string) => d && details.push(d) } });
+    const infos: Array<{ kind: string }> = [];
+    const onPhase = (_p: string, d?: string, info?: { kind: string }) => {
+      if (d) details.push(d);
+      if (info) infos.push(info);
+    };
+    await run(client, store, { callbacks: { onPhase } });
     expect(log.retrieves).toBe(4);
     expect(details.filter((d) => d.startsWith("waiting in the batch queue"))).toHaveLength(3);
+    // The same facts, for a page that words them in its own language.
+    expect(infos.map((i) => i.kind)).toEqual(["days", "batch-submitting", "batch-waiting", "batch-waiting", "batch-waiting"]);
   });
 
   test("checkpoints the batch in flight, and a resume polls that batch instead of submitting another", async () => {

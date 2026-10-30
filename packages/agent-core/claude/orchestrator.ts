@@ -12,6 +12,7 @@ import type {
   GetPageHtmlResult,
   HomepageBuildResult,
   PageRef,
+  PhaseInfo,
   RunPhase,
 } from "../types";
 
@@ -22,7 +23,7 @@ type CustomToolUse = Anthropic.Beta.Sessions.BetaManagedAgentsAgentCustomToolUse
 
 /** Callbacks with the optionality resolved, so call sites don't repeat `?.`. */
 interface Emit {
-  phase(phase: RunPhase, detail?: string): void;
+  phase(phase: RunPhase, detail?: string, info?: PhaseInfo): void;
   text(chunk: string): void;
   log(line: string): void;
 }
@@ -52,7 +53,7 @@ export interface ClaudeRunOptions extends CommonRunOptions {
 export async function runHomepageBuild(opts: ClaudeRunOptions): Promise<HomepageBuildResult> {
   const { client, bridge, store, callbacks, signal } = opts;
   const emit: Emit = {
-    phase: (p, d) => callbacks?.onPhase?.(p, d),
+    phase: (p, d, i) => callbacks?.onPhase?.(p, d, i),
     text: (t) => callbacks?.onText?.(t),
     log: (l) => callbacks?.onLog?.(l),
   };
@@ -313,7 +314,7 @@ async function runGetHistory(
   const daysToAnalyze = input.daysToAnalyze ?? DEFAULTS.daysToAnalyze;
   const maxResults = input.maxResults ?? DEFAULTS.maxResults;
 
-  emit.phase("history", `${daysToAnalyze}d`);
+  emit.phase("history", `${daysToAnalyze}d`, { kind: "days", count: daysToAnalyze });
   const { sites, totalSitesSeen } = await bridge.getHistory({ daysToAnalyze, maxResults });
   const allowed = sites.filter((site) => !isBlocked(site.domain, blockedSites));
   // Blocked domains are dropped from the count too: the model is never told they exist.
@@ -338,7 +339,7 @@ async function runGetPageHtml(
   },
 ): Promise<GetPageHtmlResult> {
   const input = event.input as { urls: string[]; loadDelayMs?: number };
-  ctx.emit.phase("scraping", `${input.urls.length} pages`);
+  ctx.emit.phase("scraping", `${input.urls.length} pages`, { kind: "pages", count: input.urls.length });
 
   const allowed: string[] = [];
   const blocked: GetPageHtmlResult["failed"] = [];

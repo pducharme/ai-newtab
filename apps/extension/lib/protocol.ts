@@ -6,7 +6,7 @@
  * every bearer token. Tabs are thin, disposable views: they connect on
  * AGENT_PORT, receive a snapshot, then stream deltas.
  */
-import type { EngineId, ModelInfo, RunPhase } from "@homepage/agent-core";
+import type { EngineId, ModelInfo, PhaseInfo, RunPhase } from "@homepage/agent-core";
 
 export const AGENT_PORT = "homepage-agent";
 
@@ -17,6 +17,8 @@ export interface BuildState {
   /** High-water index into BUILD_STEPS — only advances, so interleaved phases don't rewind the stepper. */
   stepIndex: number;
   detail: string;
+  /** What `detail` says, for the page to word in its own language. */
+  detailInfo: PhaseInfo | null;
   narration: string;
   logs: string[];
   error: string | null;
@@ -41,6 +43,7 @@ export const INITIAL_BUILD_STATE: BuildState = {
   phase: null,
   stepIndex: 0,
   detail: "",
+  detailInfo: null,
   narration: "",
   logs: [],
   error: null,
@@ -93,7 +96,7 @@ export type PageMsg =
 // worker → page (broadcast to every connected tab, except `models`, which answers its requester)
 export type BuildMsg =
   | { kind: "snapshot"; state: BuildState }
-  | { kind: "phase"; phase: RunPhase; stepIndex: number; detail: string }
+  | { kind: "phase"; phase: RunPhase; stepIndex: number; detail: string; info: PhaseInfo | null }
   | { kind: "text"; chunk: string } // narration delta
   | { kind: "log"; line: string }
   | { kind: "done"; code: string } // homepage saved; carries the raw TSX
@@ -108,13 +111,16 @@ export type BuildMsg =
  * here. `thinking` and `error` deliberately map to none, so they never move the
  * stepper.
  */
-export const BUILD_STEPS: { label: string; phases: RunPhase[] }[] = [
-  { label: "Preparing agent", phases: ["setup", "session-create"] },
-  { label: "Reading your history", phases: ["history"] },
-  { label: "Opening pages in your browser", phases: ["scraping"] },
-  { label: "Analyzing pages", phases: ["analyzing"] },
-  { label: "Writing your homepage", phases: ["writing", "cleanup", "done"] },
+export const BUILD_STEPS: { id: BuildStepId; phases: RunPhase[] }[] = [
+  { id: "prepare", phases: ["setup", "session-create"] },
+  { id: "history", phases: ["history"] },
+  { id: "pages", phases: ["scraping"] },
+  { id: "analyze", phases: ["analyzing"] },
+  { id: "write", phases: ["writing", "cleanup", "done"] },
 ];
+
+/** Each step's label is the message `progress.step.<id>`. */
+export type BuildStepId = "prepare" | "history" | "pages" | "analyze" | "write";
 
 /** Which step a phase belongs to, or `undefined` if it shouldn't move the stepper. */
 export function stepForPhase(phase: RunPhase): number | undefined {

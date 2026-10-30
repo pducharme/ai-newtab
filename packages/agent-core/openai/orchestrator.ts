@@ -25,6 +25,7 @@ import type {
   HomepageBuildResult,
   KVStore,
   PageRef,
+  PhaseInfo,
   RunPhase,
 } from "../types";
 
@@ -41,7 +42,7 @@ export const DEFAULT_REASONING_EFFORT = "medium" as const;
 
 /** Callbacks with the optionality resolved, so call sites don't repeat `?.`. */
 export interface Emit {
-  phase(phase: RunPhase, detail?: string): void;
+  phase(phase: RunPhase, detail?: string, info?: PhaseInfo): void;
   text(chunk: string): void;
   log(line: string): void;
 }
@@ -103,7 +104,7 @@ const MAX_EMPTY_TURN_NUDGES = 2;
 export async function runHomepageBuild(opts: OpenAIRunOptions): Promise<HomepageBuildResult> {
   const { bridge, store, callbacks, signal } = opts;
   const emit: Emit = {
-    phase: (p, d) => callbacks?.onPhase?.(p, d),
+    phase: (p, d, i) => callbacks?.onPhase?.(p, d, i),
     text: (t) => callbacks?.onText?.(t),
     log: (l) => callbacks?.onLog?.(l),
   };
@@ -470,7 +471,7 @@ async function runGetHistory(args: Record<string, unknown>, ctx: ToolContext): P
   const daysToAnalyze = typeof args.daysToAnalyze === "number" ? args.daysToAnalyze : DEFAULTS.daysToAnalyze;
   const maxResults = typeof args.maxResults === "number" ? args.maxResults : DEFAULTS.maxResults;
 
-  ctx.emit.phase("history", `${daysToAnalyze}d`);
+  ctx.emit.phase("history", `${daysToAnalyze}d`, { kind: "days", count: daysToAnalyze });
   const { sites, totalSitesSeen } = await ctx.bridge.getHistory({ daysToAnalyze, maxResults });
   const allowed = sites.filter((site) => !isBlocked(site.domain, ctx.blockedSites));
   // Blocked domains are dropped from the count too: the model is never told they exist.
@@ -486,7 +487,7 @@ async function runGetHistory(args: Record<string, unknown>, ctx: ToolContext): P
 async function runGetPageHtml(args: Record<string, unknown>, ctx: ToolContext): Promise<GetPageHtmlResult> {
   const urls = Array.isArray(args.urls) ? args.urls.map(String) : [];
   if (urls.length === 0) throw new Error("getPageHtml needs at least one URL.");
-  ctx.emit.phase("scraping", `${urls.length} pages`);
+  ctx.emit.phase("scraping", `${urls.length} pages`, { kind: "pages", count: urls.length });
 
   const allowed: string[] = [];
   const blocked: GetPageHtmlResult["failed"] = [];

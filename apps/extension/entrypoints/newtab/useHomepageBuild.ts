@@ -26,6 +26,7 @@ function reduce(state: BuildState, msg: BuildMsg): BuildState {
         phase: msg.phase,
         stepIndex: Math.max(state.stepIndex, msg.stepIndex),
         detail: msg.detail,
+        detailInfo: msg.info ?? null,
       };
     case "text":
       return { ...state, narration: state.narration + msg.chunk };

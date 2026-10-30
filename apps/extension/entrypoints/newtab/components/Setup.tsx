@@ -1,6 +1,8 @@
 import type { EngineId } from "@homepage/agent-core";
 import type { AuthState } from "@/lib/protocol";
+import { useI18n } from "../i18n";
 import { ApiKeySetup } from "./ApiKeySetup";
+import { LanguagePicker } from "./LanguagePicker";
 import { PlanUsageRequired } from "./PlanUsageRequired";
 import { SignIn } from "./SignIn";
 
@@ -29,6 +31,7 @@ export function Setup({
   onCancelSignIn: () => void;
   onSignOut: () => void;
 }) {
+  const { t } = useI18n();
   const choice = (selected: boolean) =>
     ({
       flex: 1,
@@ -44,19 +47,17 @@ export function Setup({
 
   return (
     <div style={{ maxWidth: 560, margin: "10vh auto", padding: 24, fontFamily: "system-ui" }}>
-      <h1 style={{ fontSize: 24 }}>Choose who writes your homepage</h1>
-      <p style={{ color: "var(--muted)", lineHeight: 1.6 }}>
-        Each build is one agent run. Pick the engine, then connect it. You can switch later in Settings.
-      </p>
+      <h1 style={{ fontSize: 24 }}>{t("setup.title")}</h1>
+      <p style={{ color: "var(--muted)", lineHeight: 1.6 }}>{t("setup.intro")}</p>
 
       <div style={{ display: "flex", gap: 12, margin: "16px 0" }}>
         <button style={choice(auth.engine === "claude")} onClick={() => onChooseEngine("claude")}>
           <b>Claude</b>
-          <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>Anthropic API key, billed per build</div>
+          <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>{t("setup.claude.hint")}</div>
         </button>
         <button style={choice(auth.engine === "openai")} onClick={() => onChooseEngine("openai")}>
           <b>OpenAI</b>
-          <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>Your ChatGPT plan, or an API key</div>
+          <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>{t("setup.openai.hint")}</div>
         </button>
       </div>
 
@@ -64,11 +65,11 @@ export function Setup({
         <div style={{ display: "flex", gap: 16, margin: "0 0 20px", fontSize: 14 }}>
           <label style={{ cursor: "pointer" }}>
             <input type="radio" checked={auth.openai.mode === "siwc"} onChange={() => onChooseOpenAIMode("siwc")} />{" "}
-            Use my ChatGPT plan (Sign in with ChatGPT)
+            {t("setup.openai.plan")}
           </label>
           <label style={{ cursor: "pointer" }}>
             <input type="radio" checked={auth.openai.mode === "apiKey"} onChange={() => onChooseOpenAIMode("apiKey")} />{" "}
-            Use an OpenAI API key
+            {t("setup.openai.apiKey")}
           </label>
         </div>
       )}
@@ -86,6 +87,8 @@ export function Setup({
           )
         )}
       </div>
+
+      <LanguagePicker style={{ marginTop: 32, color: "var(--muted)" }} />
     </div>
   );
 }

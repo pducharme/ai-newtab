@@ -11,11 +11,13 @@ import {
   listModels,
   runHomepageBuild,
   type EngineId,
+  type PhaseInfo,
   type RunOptions,
   type RunPhase,
 } from "@homepage/agent-core";
 import { shouldAutoRebuild } from "./auto-rebuild";
 import { browserBridge } from "./browser-bridge";
+import { createTranslator, normalizePreference, resolveLocale, type Translate } from "./i18n";
 import { openaiAuthState, openaiReady, openaiTokenProvider } from "./openai-auth";
 import {
   INITIAL_BUILD_STATE,
@@ -274,7 +276,7 @@ export class BuildManager {
           // Manual builds are gated behind the setup screen and auto-builds
           // require credentials, so this only happens if the key was removed.
           console.warn("[BuildManager] startBuild aborted — no API key in storage");
-          await this.fail("No Anthropic API key found. Add your key and try again.", { notify: false });
+          await this.fail((await translator()).t("error.noAnthropicKey"), { notify: false });
           return;
         }
         // The key is the user's own, read from local storage — there is no server
@@ -294,10 +296,8 @@ export class BuildManager {
         }
       } else {
         if (!(await openaiReady(settings))) {
-          const message =
-            settings.openaiAuthMode === "apiKey"
-              ? "No OpenAI API key found. Add your key and try again."
-              : "Not signed in with ChatGPT, or ChatGPT plan usage was not granted. Sign in and try again.";
+          const { t } = await translator();
+          const message = t(settings.openaiAuthMode === "apiKey" ? "error.noOpenAIKey" : "error.notSignedIn");
           console.warn("[BuildManager] startBuild aborted — OpenAI engine not ready");
           await this.fail(message, { notify: false });
           return;
@@ -315,7 +315,7 @@ export class BuildManager {
         ...run,
         signal: this.controller.signal,
         callbacks: {
-          onPhase: (phase, detail) => this.onPhase(phase, detail),
+          onPhase: (phase, detail, info) => this.onPhase(phase, detail, info),
           onText: (chunk) => this.onText(chunk),
           onLog: (line) => this.onLog(line),
         },
@@ -337,7 +337,7 @@ export class BuildManager {
         console.warn("[BuildManager] ChatGPT plan usage limit reached; build paused", error.opts.requestId ?? "");
         return;
       }
-      await this.fail(describeError(error), { notify: true });
+      await this.fail(describeError(error, (await translator()).t), { notify: true });
       console.error("[BuildManager] build failed", error);
       // A sign-in that is gone for good is reflected on every tab right away.
       if (error instanceof SiwcError) await this.broadcastAuth();
@@ -369,7 +369,7 @@ export class BuildManager {
     this.state = { ...this.state, running: false, phase: "error", error: message, notice: null };
     this.broadcast({ kind: "error", message });
     await this.mirror(true);
-    if (opts.notify) this.notifyFailure(message);
+    if (opts.notify) await this.notifyFailure(message);
   }
 
   cancel() {
@@ -378,12 +378,12 @@ export class BuildManager {
 
   // ---- callback fan-out ----------------------------------------------------
 
-  private onPhase(phase: RunPhase, detail?: string) {
+  private onPhase(phase: RunPhase, detail?: string, info?: PhaseInfo) {
     const mapped = stepForPhase(phase);
     const stepIndex =
       mapped === undefined ? this.state.stepIndex : Math.max(this.state.stepIndex, mapped);
-    this.state = { ...this.state, phase, stepIndex, detail: detail ?? "" };
-    this.broadcast({ kind: "phase", phase, stepIndex, detail: detail ?? "" });
+    this.state = { ...this.state, phase, stepIndex, detail: detail ?? "", detailInfo: info ?? null };
+    this.broadcast({ kind: "phase", phase, stepIndex, detail: detail ?? "", info: info ?? null });
     void this.mirror(false);
   }
 
@@ -448,15 +448,16 @@ export class BuildManager {
 
   // ---- failure surfacing ---------------------------------------------------
 
-  private notifyFailure(message: string) {
+  private async notifyFailure(message: string) {
     // Only ping when nobody is watching — an open tab already shows the error
     // inline. A headless daily build that fails otherwise vanishes silently.
     if (this.ports.size > 0) return;
+    const { t } = await translator();
     try {
       browser.notifications.create({
         type: "basic",
         iconUrl: browser.runtime.getURL("/icon/128.png"),
-        title: "Homepage build failed",
+        title: t("error.notificationTitle"),
         message: message.slice(0, 200),
       });
     } catch {
@@ -465,10 +466,19 @@ export class BuildManager {
   }
 }
 
-/** A user-facing line for whatever the build threw. */
-function describeError(error: unknown): string {
+/** The interface language's words, for the messages the worker writes itself (failures, the notification). */
+async function translator() {
+  const stored = await browser.storage.local.get(KEYS.language);
+  return createTranslator(resolveLocale(normalizePreference(stored[KEYS.language])));
+}
+
+/**
+ * A user-facing line for whatever the build threw. Only the cancellation is the
+ * extension's own wording; engine and API errors stay as they are sent.
+ */
+function describeError(error: unknown, t: Translate): string {
   if (error instanceof OpenAIError) return describeOpenAIError(error);
-  if (error instanceof Error) return error.message === "aborted" ? "Build cancelled." : error.message;
+  if (error instanceof Error) return error.message === "aborted" ? t("error.cancelled") : error.message;
   return String(error);
 }
 

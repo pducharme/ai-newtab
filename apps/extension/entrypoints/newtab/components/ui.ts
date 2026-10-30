@@ -34,6 +34,15 @@ export const noticeBox: CSSProperties = {
   fontSize: 13,
 };
 
+export const selectStyle: CSSProperties = {
+  padding: "4px 8px",
+  fontSize: 14,
+  borderRadius: 4,
+  border: "1px solid var(--border)",
+  background: "var(--panel)",
+  color: "var(--fg)",
+};
+
 export const input: CSSProperties = {
   width: "100%",
   boxSizing: "border-box",

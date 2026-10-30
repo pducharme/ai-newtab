@@ -1,20 +1,19 @@
 import { useState } from "react";
+import { useI18n } from "../i18n";
 import { btn, input } from "./ui";
 
 const PROVIDERS = {
   anthropic: {
-    title: "Connect your Anthropic API key",
+    title: "apiKey.anthropic.title",
+    body: "apiKey.anthropic.body",
     prefix: "sk-ant-",
     placeholder: "sk-ant-...",
-    api: "the Anthropic API",
-    console: "console.anthropic.com",
   },
   openai: {
-    title: "Connect your OpenAI API key",
+    title: "apiKey.openai.title",
+    body: "apiKey.openai.body",
     prefix: "sk-",
     placeholder: "sk-proj-...",
-    api: "the OpenAI API",
-    console: "platform.openai.com",
   },
 } as const;
 
@@ -25,18 +24,15 @@ export function ApiKeySetup({
   provider: keyof typeof PROVIDERS;
   onSave: (key: string) => void;
 }) {
+  const { t, rich } = useI18n();
   const [value, setValue] = useState("");
   const p = PROVIDERS[provider];
   const valid = value.trim().startsWith(p.prefix);
 
   return (
     <div>
-      <h2 style={{ fontSize: 20, marginTop: 0 }}>{p.title}</h2>
-      <p style={{ color: "var(--muted)", lineHeight: 1.6 }}>
-        The agent runs inside this extension and talks to {p.api} directly. Your key is stored
-        in <code>chrome.storage.local</code> on this machine and is never sent anywhere else.
-        Keys come from {p.console}.
-      </p>
+      <h2 style={{ fontSize: 20, marginTop: 0 }}>{t(p.title)}</h2>
+      <p style={{ color: "var(--muted)", lineHeight: 1.6 }}>{rich(p.body, { code: (text) => <code>{text}</code> })}</p>
       <input
         type="password"
         value={value}
@@ -49,7 +45,7 @@ export function ApiKeySetup({
         disabled={!valid}
         onClick={() => onSave(value.trim())}
       >
-        Save key
+        {t("apiKey.save")}
       </button>
     </div>
   );

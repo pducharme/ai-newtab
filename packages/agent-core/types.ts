@@ -106,8 +106,19 @@ export type RunPhase =
   | "done"
   | "error";
 
+/**
+ * The facts behind a phase's detail line, for an interface that words it in
+ * another language. The detail string stays the English wording, for logs and
+ * the CLI.
+ */
+export type PhaseInfo =
+  | { kind: "days"; count: number }
+  | { kind: "pages"; count: number }
+  | { kind: "batch-submitting" }
+  | { kind: "batch-waiting"; seconds: number };
+
 export interface RunCallbacks {
-  onPhase?(phase: RunPhase, detail?: string): void;
+  onPhase?(phase: RunPhase, detail?: string, info?: PhaseInfo): void;
   /** Streamed assistant prose, for a progress panel. */
   onText?(text: string): void;
   onLog?(line: string): void;

@@ -1,15 +1,17 @@
 import { CHATGPT_USAGE_URL } from "@homepage/agent-core";
+import type { Translator } from "@/lib/i18n";
 import type { BuildNotice } from "@/lib/protocol";
+import { useI18n } from "../i18n";
 import { btn, btnQuiet as quiet, noticeBox } from "./ui";
 
-/** "at 5:19 PM" today, "on Tue, Oct 27" otherwise. */
-function when(at: string): string {
+/** "… reached at 5:19 PM" today, "… reached on Tue, Oct 27" otherwise, in the interface's language. */
+function title({ t, locale }: Translator, at: string): string {
   const date = new Date(at);
-  if (Number.isNaN(date.getTime())) return "";
+  if (Number.isNaN(date.getTime())) return t("notice.title");
   if (date.toDateString() === new Date().toDateString()) {
-    return `at ${date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+    return t("notice.titleAt", { time: date.toLocaleTimeString(locale.code, { hour: "numeric", minute: "2-digit" }) });
   }
-  return `on ${date.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}`;
+  return t("notice.titleOn", { date: date.toLocaleDateString(locale.code, { weekday: "short", month: "short", day: "numeric" }) });
 }
 
 /**
@@ -36,7 +38,9 @@ export function UsageLimitNotice({
   onRetry: () => void;
   onDismiss?: () => void;
 }) {
-  const reached = when(notice.at);
+  const i18n = useI18n();
+  const { t } = i18n;
+  const heading = title(i18n, notice.at);
   const small = variant === "banner" ? { padding: "4px 10px", fontSize: 13 } : {};
 
   const actions = (
@@ -48,15 +52,15 @@ export function UsageLimitNotice({
         data-testid="usage-link"
         style={{ ...btn, ...small, textDecoration: "none", display: "inline-block" }}
       >
-        See usage on ChatGPT ↗
+        {t("notice.seeUsage")} ↗
       </a>
       <button style={{ ...quiet, ...small }} onClick={onUseApiKey} data-testid="use-api-key">
-        {apiKeySaved ? "Build with my OpenAI API key" : "Use an OpenAI API key"}
+        {t(apiKeySaved ? "notice.buildWithKey" : "notice.useKey")}
       </button>
       {variant === "banner" && (
         // The empty state already has its own build button right below.
         <button style={{ ...quiet, ...small }} onClick={onRetry}>
-          Try again
+          {t("notice.tryAgain")}
         </button>
       )}
     </div>
@@ -82,14 +86,13 @@ export function UsageLimitNotice({
         }}
       >
         <div style={{ flex: 1 }}>
-          <b>ChatGPT usage limit reached{reached ? ` ${reached}` : ""}.</b> This is your last homepage; the
-          next one will be built once your plan&apos;s allowance for apps resets.
+          <b>{heading}.</b> {t("notice.banner")}
           {actions}
         </div>
         {onDismiss && (
           <button
             onClick={onDismiss}
-            title="Dismiss"
+            title={t("common.dismiss")}
             style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", fontSize: 16, lineHeight: 1 }}
           >
             ✕
@@ -101,15 +104,10 @@ export function UsageLimitNotice({
 
   return (
     <div role="status" data-testid="usage-limit-notice" style={{ ...noticeBox, margin: "16px 0", padding: 16, borderRadius: 6 }}>
-      <div style={{ fontWeight: 600, fontSize: 15 }}>ChatGPT usage limit reached{reached ? ` ${reached}` : ""}</div>
-      <p style={{ margin: "6px 0 0", lineHeight: 1.5 }}>
-        Your ChatGPT plan&apos;s allowance for apps like this one is used up for now, so no homepage was built. Nothing is
-        broken: the allowance resets on its own. Check when on ChatGPT, or build with an API key in the meantime.
-      </p>
+      <div style={{ fontWeight: 600, fontSize: 15 }}>{heading}</div>
+      <p style={{ margin: "6px 0 0", lineHeight: 1.5 }}>{t("notice.panel")}</p>
       {actions}
-      <p style={{ margin: "10px 0 0", fontSize: 12, opacity: 0.8 }}>
-        An API key is billed per build to your OpenAI API account. You can switch back to your ChatGPT plan in Settings.
-      </p>
+      <p style={{ margin: "10px 0 0", fontSize: 12, opacity: 0.8 }}>{t("notice.panelFooter")}</p>
     </div>
   );
 }

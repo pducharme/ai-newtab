@@ -14,7 +14,10 @@
  *      dismissible banner over it, not an error (the panel, worker-restart and
  *      API-key checks run in the engine branch's version of this test),
  *  10. the Claude engine's Message Batches toggle is stored, and a batch-mode
- *      build runs end to end in the worker: real SDK, real history, real storage.
+ *      build runs end to end in the worker: real SDK, real history, real storage,
+ *  11. the interface language: Chrome loads the generated _locales, picking
+ *      Français in Settings translates the page at once and survives a reload,
+ *      the worker's own failures follow it, and a change from another tab applies live.
  *
  * No API calls are made: step 9 runs against fake ChatGPT credentials in the
  * throwaway profile, with the worker's `fetch` stubbed to answer the way the
@@ -32,6 +35,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createTranslator, resolveLocale } from "../apps/extension/lib/i18n";
 
 const CHROME = process.env.CHROME_PATH ?? chromeForTesting() ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
@@ -128,6 +132,10 @@ const chrome = spawn(
     "--no-first-run",
     "--no-default-browser-check",
     "--enable-unsafe-extension-debugging", // required for the CDP Extensions domain
+    // The interface follows the browser's language; pin it so the checks read the
+    // same on every machine (step 11 emulates another one on purpose).
+    "--lang=en-US",
+    "--accept-lang=en-US",
     `--remote-debugging-port=${PORT}`,
     `--user-data-dir=${profile}`,
     "about:blank",
@@ -603,6 +611,80 @@ try {
   );
   const leftover = await page.evaluate<unknown>(`chrome.storage.local.get("claudeBatchBuild").then((r) => r.claudeBatchBuild ?? null)`);
   check("the finished batch build leaves no checkpoint behind", leftover === null);
+
+  // ---- 11. interface language ------------------------------------------------
+  // Chrome names the extension in its own UI language (on macOS, the system's; --lang doesn't apply there).
+  const uiLanguage = await page.evaluate<string>(`chrome.i18n.getUILanguage()`);
+  const extName = await page.evaluate<string>(`chrome.i18n.getMessage("extName")`);
+  check(
+    "Chrome reads the extension's name from the generated _locales",
+    extName === createTranslator(resolveLocale("auto", [uiLanguage])).t("manifest.name"),
+    `${uiLanguage}: ${extName}`,
+  );
+  await page.send("Page.reload");
+  await sleep(2500);
+  await openSettings();
+  await sleep(300);
+  const languages = await page.evaluate<string[]>(
+    `[...(document.querySelector('[data-testid="language-select"]')?.options ?? [])].map((o) => o.value + "=" + o.textContent)`,
+  );
+  check(
+    "Settings offers the language picker: the browser's language, then each catalog by its own name",
+    languages[0]?.startsWith("auto=") && languages.includes("en=English") && languages.includes("fr=Français"),
+    languages.join(" | "),
+  );
+  await page.evaluate(`(() => {
+    const sel = document.querySelector('[data-testid="language-select"]');
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(sel, "fr");
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+  })()`);
+  await sleep(500);
+  const french = await page.evaluate<{ text: string; lang: string; title: string; stored: string | null }>(`
+    (async () => ({
+      text: document.body.innerText,
+      lang: document.documentElement.lang,
+      title: document.title,
+      stored: (await chrome.storage.local.get("language")).language ?? null,
+    }))()
+  `);
+  check(
+    "picking Français translates the open page at once (Settings, toolbar, <html lang>, tab title) and stores it",
+    /Personnaliser votre page d’accueil/.test(french.text) &&
+      /Paramètres/.test(french.text) &&
+      /Enregistrer et régénérer/.test(french.text) &&
+      french.lang === "fr" &&
+      french.title === "Votre page d’accueil" &&
+      french.stored === "fr",
+    JSON.stringify({ lang: french.lang, title: french.title, stored: french.stored }),
+  );
+  await shotTo("settings-fr.png");
+  await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Annuler")?.click()`);
+  await page.send("Page.reload");
+  await sleep(2500);
+  const reloaded = await page.evaluate<string>("document.documentElement.lang + ' ' + document.body.innerText");
+  check("after a reload the page opens in French", /^fr /.test(reloaded) && /Régénérer/.test(reloaded), reloaded.slice(0, 60));
+
+  // The worker writes its own failures in the same language.
+  await page.evaluate(`chrome.storage.local.remove("apiKey")`);
+  const frenchError = (await talk({ kind: "startBuild" }, 3000)).find((m) => m.kind === "error");
+  check(
+    "the worker words its own failures in the chosen language",
+    /Aucune clé API Anthropic trouvée/.test(frenchError?.message ?? ""),
+    frenchError?.message,
+  );
+
+  // A change made elsewhere (another tab, here a direct write) applies live.
+  await page.evaluate(`chrome.storage.local.set({ language: "auto" })`);
+  await sleep(600);
+  const backToAuto = await page.evaluate<string>("document.documentElement.lang + ' ' + document.body.innerText");
+  check("switching back to the browser's language elsewhere applies live", /^en /.test(backToAuto), backToAuto.slice(0, 60));
+
+  // "auto" follows the browser: a French-Canadian one gets the French catalog.
+  await page.send("Emulation.setUserAgentOverride", { userAgent: await page.evaluate<string>("navigator.userAgent"), acceptLanguage: "fr-CA,fr" });
+  await page.send("Page.reload");
+  await sleep(2500);
+  const canadian = await page.evaluate<string>("navigator.languages.join() + ' ' + document.documentElement.lang + ' ' + document.body.innerText");
+  check("on auto, a browser set to fr-CA gets the French interface", /^fr-CA,fr fr /.test(canadian), canadian.slice(0, 60));
 
   page.close();
   browser.close();

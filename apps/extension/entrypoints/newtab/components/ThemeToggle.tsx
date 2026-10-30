@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactElement } from "react";
-import type { ThemePreference } from "@/lib/theme";
+import { nextTheme, type ThemePreference } from "@/lib/theme";
+import { useI18n } from "../i18n";
 
 /**
  * Stroke icons in one visual language (24-unit grid, 1.75 stroke, round
@@ -21,18 +22,6 @@ const ICONS: Record<ThemePreference, ReactElement> = {
   ),
 };
 
-const LABELS: Record<ThemePreference, string> = {
-  system: "Theme: follows the system",
-  dark: "Theme: dark",
-  light: "Theme: light",
-};
-
-const NEXT: Record<ThemePreference, string> = {
-  system: "switch to dark",
-  dark: "switch to light",
-  light: "follow the system",
-};
-
 /** One button that cycles System → Dark → Light. The icon shows the current choice. */
 export function ThemeToggle({
   theme,
@@ -43,13 +32,15 @@ export function ThemeToggle({
   onCycle: () => void;
   style?: CSSProperties;
 }) {
+  const { t } = useI18n();
+  const words = { current: t(`theme.${theme}`), next: t(`theme.to.${nextTheme(theme)}`) };
   return (
     <button
       type="button"
       className="theme-toggle"
       onClick={onCycle}
-      title={`${LABELS[theme]} — click to ${NEXT[theme]}`}
-      aria-label={`${LABELS[theme]}. Click to ${NEXT[theme]}.`}
+      title={t("theme.title", words)}
+      aria-label={t("theme.label", words)}
       data-theme-toggle={theme}
       style={style}
     >

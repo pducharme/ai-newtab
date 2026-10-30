@@ -92,7 +92,7 @@ const BATCH_NOTE = [
 export async function runClaudeBatchBuild(opts: ClaudeBatchRunOptions): Promise<HomepageBuildResult> {
   const { client, bridge, store, callbacks, signal } = opts;
   const emit: Emit = {
-    phase: (p, d) => callbacks?.onPhase?.(p, d),
+    phase: (p, d, i) => callbacks?.onPhase?.(p, d, i),
     text: (t) => callbacks?.onText?.(t),
     log: (l) => callbacks?.onLog?.(l),
   };
@@ -261,7 +261,7 @@ async function submitTurn(
     cache_control: { type: "ephemeral", ttl: "1h" },
     output_config: { effort: "medium" },
   };
-  emit.phase("thinking", "submitting to the batch queue");
+  emit.phase("thinking", "submitting to the batch queue", { kind: "batch-submitting" });
   const batch = await client.messages.batches.create({ requests: [{ custom_id: customId, params }] });
   emit.log(`turn ${state.turn}: batch ${batch.id} submitted`);
   return { batchId: batch.id, customId, submittedAt: new Date().toISOString() };
@@ -282,7 +282,10 @@ async function awaitTurn(
     if (ctx.signal?.aborted) throw new Error("aborted");
     const batch = await client.messages.batches.retrieve(pending.batchId);
     if (batch.processing_status === "ended") break;
-    ctx.emit.phase("thinking", `waiting in the batch queue · ${elapsed(submitted)}`);
+    ctx.emit.phase("thinking", `waiting in the batch queue · ${elapsed(submitted)}`, {
+      kind: "batch-waiting",
+      seconds: Math.max(0, Math.round((Date.now() - submitted) / 1000)),
+    });
     await sleep(ctx.pollIntervals[Math.min(poll, ctx.pollIntervals.length - 1)] ?? 60_000, ctx.signal);
   }
 
