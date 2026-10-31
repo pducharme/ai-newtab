@@ -438,6 +438,8 @@ try {
   await sleep(400);
   const modalText = await page.evaluate<string>("document.body.innerText");
   check("settings modal opens over the homepage, themed", opened && /Customize your homepage/.test(modalText));
+  const focused = await page.evaluate<string>("document.activeElement?.id ?? ''");
+  check("Settings opens on the standing instructions, ready to type", focused === "settings-instructions", focused);
   await shoot("dark-settings");
   const lookOptions = await page.evaluate<number>(
     `(() => { const sel = [...document.querySelectorAll("select")].find((s) => [...s.options].some((o) => o.value === "metropolitan")); return sel ? sel.options.length : 0; })()`,
@@ -497,6 +499,7 @@ try {
     return true;
   })()`);
   await sleep(800);
+  await shotTo("settings-openai.png");
   await closeSettings();
   const { worker: bannerWorker, ok: bannerPatched } = await stubWorkerFetch();
   await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.title === "Rebuild now")?.click()`);
@@ -658,7 +661,14 @@ try {
     JSON.stringify({ lang: french.lang, title: french.title, stored: french.stored }),
   );
   await shotTo("settings-fr.png");
-  await page.evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Annuler")?.click()`);
+  await page.send("Emulation.setDeviceMetricsOverride", { width: 600, height: 900, deviceScaleFactor: 1, mobile: false });
+  await sleep(300);
+  await shotTo("settings-fr-narrow.png");
+  await page.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  // Esc closes Settings when nothing is left unsaved.
+  await page.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);
+  await sleep(300);
+  check("Esc closes Settings", await page.evaluate<boolean>(`!document.querySelector('[role="dialog"]')`));
   await page.send("Page.reload");
   await sleep(2500);
   const reloaded = await page.evaluate<string>("document.documentElement.lang + ' ' + document.body.innerText");

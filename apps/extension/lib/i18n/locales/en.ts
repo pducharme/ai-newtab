@@ -16,6 +16,7 @@ export default {
   // ---- shared ---------------------------------------------------------------
   "common.cancel": "Cancel",
   "common.dismiss": "Dismiss",
+  "common.close": "Close",
   "common.signOut": "Sign out",
   "common.settings": "Settings",
 
@@ -113,19 +114,24 @@ export default {
 
   // ---- settings ---------------------------------------------------------------
   "settings.title": "Customize your homepage",
-  "settings.instructions.help": "Standing instructions applied to every build.",
+  "settings.instructions.label": "Standing instructions",
+  "settings.instructions.help": "The agent follows them on every build.",
   "settings.instructions.placeholder":
     "e.g. 'Focus on tech news and Rust releases', 'Always surface unread GitHub PRs first'",
+  "settings.instructions.languageTip": "To get the homepage in a given language, say so here.",
   "settings.blocked.label": "Sites the agent never reads",
   "settings.blocked.help": "One per line. Subdomains are included. Use *.example.com for wildcards.",
+  "settings.blocked.count": { one: "{count} site", other: "{count} sites" },
+  "settings.discard": "Discard your unsaved changes?",
+  "settings.applyNow": "These apply right away.",
+  "settings.group.display": "Display",
+  "settings.group.agent": "Agent",
+  "settings.group.schedule": "Schedule",
   "settings.language.label": "Language",
   "settings.language.auto": "Same as the browser ({language})",
-  "settings.language.help":
-    "Changes this extension's screens right away. The homepage itself is written by the agent: to get it in a given language, ask for it in the instructions above.",
   "settings.look.label": "Look",
   "settings.look.agent": "As the agent built it",
-  "settings.look.help":
-    "A look re-dresses the page instantly: typography, palette and rules change, the stories stay. Pages built before this version follow it from their next build.",
+  "settings.look.help": "The agent's own typography and colours. A look changes them instantly; the stories stay.",
   "settings.links.label": "Links open in",
   "settings.links.newTab": "a new tab",
   "settings.links.sameTab": "this tab",
@@ -134,11 +140,9 @@ export default {
   "settings.model.label": "Model",
   "settings.model.none": "No models listed",
   "settings.model.refresh": "Fetch the models these credentials offer",
-  "settings.model.help": "Models your credentials offer, in OpenAI's order. The new model takes effect from your next build.",
-  "settings.batch.label": "Use the Message Batches API: half price, slower",
-  "settings.batch.on":
-    "Every step of the build waits in Anthropic's batch queue, usually a few minutes, at most 24 hours. The build carries on in the background and the homepage appears when it is done.",
-  "settings.batch.off": "Off: builds run as a Managed Agents session at the standard price, in a few minutes.",
+  "settings.batch.label": "Message Batches: half price, slower",
+  "settings.batch.on": "Each step waits in Anthropic's batch queue, usually a few minutes, at most 24 hours. The homepage appears when it is done.",
+  "settings.batch.off": "Off: standard price, done in a few minutes.",
   "settings.key.anthropic": "Anthropic API key: <b>{status}</b>",
   "settings.key.openai": "OpenAI API key: <b>{status}</b>",
   "settings.key.saved": "saved",
@@ -155,8 +159,7 @@ export default {
   "settings.chatgpt.switchTitle": "Sign out and forget this app's registration, so the next sign-in can use another account",
   "settings.chatgpt.usage": "Usage counts against your ChatGPT plan. Review it at <link>chatgpt.com/settings/usage</link>.",
   "settings.auto.label": "Rebuild automatically each morning",
-  "settings.auto.help":
-    "When on, the extension builds one morning edition a day in the background (first time Chrome is open between 5am and noon), so your next tab shows a fresh one (uses your key or plan).",
+  "settings.auto.help": "One edition in the background, the first time Chrome is open between 5am and noon. Uses your key or plan.",
   "settings.save": "Save & rebuild",
 
   "engine.claude": "Claude (Anthropic API key)",

@@ -14,6 +14,7 @@ export default {
   // ---- commun ---------------------------------------------------------------
   "common.cancel": "Annuler",
   "common.dismiss": "Fermer",
+  "common.close": "Fermer",
   "common.signOut": "Se déconnecter",
   "common.settings": "Paramètres",
 
@@ -113,19 +114,24 @@ export default {
 
   // ---- paramètres -------------------------------------------------------------
   "settings.title": "Personnaliser votre page d’accueil",
-  "settings.instructions.help": "Des consignes permanentes, appliquées à chaque génération.",
+  "settings.instructions.label": "Consignes permanentes",
+  "settings.instructions.help": "L’agent les suit à chaque génération.",
   "settings.instructions.placeholder":
     "p. ex. « Privilégie l’actualité tech et les versions de Rust », « Affiche toujours en premier les PR GitHub non lues »",
+  "settings.instructions.languageTip": "Pour avoir la page d’accueil dans une langue précise, dites-le ici.",
   "settings.blocked.label": "Sites que l’agent ne lit jamais",
   "settings.blocked.help": "Un par ligne. Les sous-domaines sont inclus. Utilisez *.example.com comme joker.",
+  "settings.blocked.count": { one: "{count} site", other: "{count} sites" },
+  "settings.discard": "Abandonner les modifications non enregistrées ?",
+  "settings.applyNow": "Ces réglages s’appliquent tout de suite.",
+  "settings.group.display": "Affichage",
+  "settings.group.agent": "Agent",
+  "settings.group.schedule": "Planification",
   "settings.language.label": "Langue",
   "settings.language.auto": "Celle du navigateur ({language})",
-  "settings.language.help":
-    "S’applique tout de suite aux écrans de l’extension. La page d’accueil elle-même est rédigée par l’agent : pour l’obtenir dans une langue précise, demandez-le dans les consignes ci-dessus.",
   "settings.look.label": "Apparence",
   "settings.look.agent": "Telle que l’agent l’a construite",
-  "settings.look.help":
-    "Une apparence rhabille la page instantanément : la typographie, la palette et les filets changent, les articles restent. Les pages créées avant cette version la suivent à partir de leur prochaine génération.",
+  "settings.look.help": "La typographie et les couleurs choisies par l’agent. Une apparence les change instantanément ; les articles restent.",
   "settings.links.label": "Ouvrir les liens dans",
   "settings.links.newTab": "un nouvel onglet",
   "settings.links.sameTab": "cet onglet",
@@ -134,13 +140,9 @@ export default {
   "settings.model.label": "Modèle",
   "settings.model.none": "Aucun modèle proposé",
   "settings.model.refresh": "Récupérer les modèles offerts par ces identifiants",
-  "settings.model.help":
-    "Les modèles offerts par vos identifiants, dans l’ordre d’OpenAI. Le nouveau modèle s’applique dès la prochaine génération.",
-  "settings.batch.label": "Utiliser l’API Message Batches : moitié prix, plus lent",
-  "settings.batch.on":
-    "Chaque étape de la génération attend dans la file de traitement par lots d’Anthropic, en général quelques minutes, au plus 24 heures. La génération se poursuit en arrière-plan et la page d’accueil apparaît une fois terminée.",
-  "settings.batch.off":
-    "Désactivé : les générations s’exécutent dans une session Managed Agents au prix standard, en quelques minutes.",
+  "settings.batch.label": "Message Batches : moitié prix, plus lent",
+  "settings.batch.on": "Chaque étape attend dans la file de traitement par lots d’Anthropic, en général quelques minutes, au plus 24 heures. La page d’accueil apparaît une fois terminée.",
+  "settings.batch.off": "Désactivé : prix standard, terminé en quelques minutes.",
   "settings.key.anthropic": "Clé API Anthropic : <b>{status}</b>",
   "settings.key.openai": "Clé API OpenAI : <b>{status}</b>",
   "settings.key.saved": "enregistrée",
@@ -159,8 +161,7 @@ export default {
   "settings.chatgpt.usage":
     "L’utilisation est décomptée de votre forfait ChatGPT. Consultez-la sur <link>chatgpt.com/settings/usage</link>.",
   "settings.auto.label": "Régénérer automatiquement chaque matin",
-  "settings.auto.help":
-    "Si l’option est activée, l’extension crée une édition du matin par jour en arrière-plan (la première fois que Chrome est ouvert entre 5 h et midi) : votre prochain onglet en affiche une toute fraîche (avec votre clé ou votre forfait).",
+  "settings.auto.help": "Une édition en arrière-plan, la première fois que Chrome est ouvert entre 5 h et midi. Utilise votre clé ou votre forfait.",
   "settings.save": "Enregistrer et régénérer",
 
   "engine.claude": "Claude (clé API Anthropic)",
